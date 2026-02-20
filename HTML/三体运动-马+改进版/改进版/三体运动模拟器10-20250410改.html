@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        canvas {
+            border: 1px solid #000;
+            float: left;
+            background-color: black;
+        }
+
+        .controls {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            overflow: hidden;
+        }
+
+        .param-group {
+            margin: 5px 0;
+            padding: 5px;
+            border: 1px solid #ddd;
+        }
+
+        .body-params {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #666;
+        }
+
+        .data-panel {
+            float: left;
+            margin-left: 20px;
+            padding: 10px;
+            border: 1px solid #999;
+            background: #333;
+            color: white;
+        }
+
+        .data-body {
+            margin: 10px 0;
+            padding: 5px;
+            border: 1px solid #444;
+        }
+
+        .data-body h4 {
+            margin: 0 0 5px 0;
+            color: #88f;
+        }
+
+        .log-panel {
+            float: left;
+            margin-left: 20px;
+            padding: 10px;
+            border: 1px solid #999;
+            background: #333;
+            color: white;
+            width: 200px;
+            height: 600px;
+            overflow-y: auto;
+        }
+
+        .view-controls {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            float: left;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="controls">
+        <button onclick="toggleSimulation()">开始/暂停</button>
+        <button onclick="reset()">重置</button>
+        <button onclick="exportLog()">导出日志</button>
+        <button onclick="repeatSimulation()">重复模拟</button>
+        <button onclick="exportSourceCode()">导出源码</button>
+
+        <div class="param-group">
+            维度:
+            <select id="dimension" onchange="reset()">
+                <option value="2">2D</option>
+                <option value="3">3D</option>
+            </select>
+            质点数量:
+            <input type="number" id="bodyCount" value="3" min="1" onchange="reset()">
+        </div>
+
+        <div class="param-group">
+            引力常数: <input type="number" id="G" value="100" step="10">
+            时间步长: <input type="number" id="dt" value="0.01" step="0.01">
+        </div>
+
+        <div id="bodyParamsContainer"></div>
+    </div>
+
+    <div class="view-controls">
+        <button onclick="moveCanvas(-10, 0)">左移</button>
+        <button onclick="moveCanvas(10, 0)">右移</button>
+        <button onclick="moveCanvas(0, -10)">上移</button>
+        <button onclick="moveCanvas(0, 10)">下移</button>
+        <button onclick="resetView()">恢复初始视点</button>
+        <label for="trackedBody">追踪质点: </label>
+        <select id="trackedBody" onchange="setTrackedBody()">
+            <option value="-1">不追踪</option>
+        </select>
+    </div>
+
+    <div id="dataPanel" class="data-panel"></div>
+    <div id="logPanel" class="log-panel"></div>
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let isRunning = false;
+        let bodies = [];
+        let log = [];
+        let lastSimulationParams = null;
+        let offsetX = 0;
+        let offsetY = 0;
+        let angleX = 0;
+        let angleY = 0;
+        let initialOffsetX = 0;
+        let initialOffsetY = 0;
+        let trackedBodyIndex = -1;
+
+        class Body {
+            constructor(mass, position, velocity, color) {
+                this.mass = mass;
+                this.position = position;
+                this.velocity = velocity;
+                this.color = color;
+                this.trail = [];
+            }
+        }
+
+        function toggleSimulation() {
+            isRunning = !isRunning;
+            if (isRunning) update();
+        }
+
+        function reset() {
+            const bodyCount = parseInt(document.getElementById('bodyCount').value);
+            const dimension = document.getElementById('dimension').value;
+            const G = parseFloat(document.getElementById('G').value);
+            const dt = parseFloat(document.getElementById('dt').value);
+
+            // 保存当前参数
+            lastSimulationParams = {
+                bodyCount,
+                dimension,
+                G,
+                dt,
+                bodyParams: []
+            };
+
+            // 控制参数面板显示
+            const bodyParamsContainer = document.getElementById('bodyParamsContainer');
+            bodyParamsContainer.innerHTML = '';
+            for (let i = 0; i < bodyCount; i++) {
+                const paramDiv = document.createElement('div');
+                paramDiv.classList.add('body-params');
+                paramDiv.id = `body${i + 1}`;
+                paramDiv.innerHTML = `
+          <h4>质点 ${i + 1}</h4>
+          颜色: <input type="color" class="color" value="#${Math.floor(Math.random() * 16777215).toString(16)}">
+          质量: <input type="number" class="mass" value="${Math.random() * 100 + 10}" step="10">
+          位置X: <input type="number" class="posX" value="${Math.random() * canvas.width}" step="10">
+          位置Y: <input type="number" class="posY" value="${Math.random() * canvas.height}" step="10">
+          <span class="posZContainer">
+            位置Z: <input type="number" class="posZ" value="0" step="10">
+          </span>
+          速度X: <input type="number" class="velX" value="${(Math.random() - 0.5) * 10}" step="0.1">
+          速度Y: <input type="number" class="velY" value="${(Math.random() - 0.5) * 10}" step="0.1">
+          <span class="velZContainer">
+            速度Z: <input type="number" class="velZ" value="0" step="0.1">
+          </span>
+        `;
+                bodyParamsContainer.appendChild(paramDiv);
+            }
+
+            // 维度控制
+            document.querySelectorAll('.velZContainer, .posZContainer').forEach(container => {
+                container.style.display = dimension === '3' ? 'inline' : 'none';
+            });
+
+            // 初始化质点
+            bodies = [];
+            document.querySelectorAll('.body-params').forEach((param, index) => {
+                if (index >= bodyCount) return;
+                const mass = parseFloat(param.querySelector('.mass').value);
+                const posX = parseFloat(param.querySelector('.posX').value);
+                const posY = parseFloat(param.querySelector('.posY').value);
+                const posZ = parseFloat(param.querySelector('.posZ').value);
+                const velX = parseFloat(param.querySelector('.velX').value);
+                const velY = parseFloat(param.querySelector('.velY').value);
+                const velZ = parseFloat(param.querySelector('.velZ').value);
+                const color = param.querySelector('.color').value;
+
+                bodies.push(new Body(
+                    mass,
+                    { x: posX, y: posY, z: posZ },
+                    { x: velX, y: velY, z: velZ },
+                    color
+                ));
+
+                lastSimulationParams.bodyParams.push({
+                    mass,
+                    posX,
+                    posY,
+                    posZ,
+                    velX,
+                    velY,
+                    velZ,
+                    color
+                });
+            });
+
+            // 添加实时位置更新事件
+            document.querySelectorAll('.body-params').forEach((param, index) => {
+                const updatePosition = () => {
+                    if (index < bodies.length) {
+                        bodies[index].position.x = parseFloat(param.querySelector('.posX').value);
+                        bodies[index].position.y = parseFloat(param.querySelector('.posY').value);
+                        bodies[index].position.z = parseFloat(param.querySelector('.posZ').value);
+                    }
+                };
+                param.querySelectorAll('.posX, .posY, .posZ').forEach(input => {
+                    input.addEventListener('input', updatePosition);
+                });
+            });
+
+            // 更新追踪质点选择框
+            const trackedBodySelect = document.getElementById('trackedBody');
+            trackedBodySelect.innerHTML = '<option value="-1">不追踪</option>';
+            for (let i = 0; i < bodyCount; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `质点 ${i + 1}`;
+                trackedBodySelect.appendChild(option);
+            }
+
+            createDataPanel();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            log = [];
+            document.getElementById('logPanel').innerHTML = '';
+            offsetX = 0;
+            offsetY = 0;
+            initialOffsetX = 0;
+            initialOffsetY = 0;
+            trackedBodyIndex = -1;
+        }
+
+        function update() {
+            if (!isRunning) return;
+
+            const G = parseFloat(document.getElementById('G').value);
+            const dt = parseFloat(document.getElementById('dt').value);
+            const dimension = parseInt(document.getElementById('dimension').value);
+
+            // 计算加速度
+            bodies.forEach(body => {
+                let ax = 0, ay = 0, az = 0;
+                bodies.forEach(other => {
+                    if (body === other) return;
+                    const dx = other.position.x - body.position.x;
+                    const dy = other.position.y - body.position.y;
+                    const dz = dimension === 3 ? other.position.z - body.position.z : 0;
+                    const r = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    const F = G * other.mass / (r * r + 1e-6);
+
+                    ax += F * dx / r;
+                    ay += F * dy / r;
+                    az += dimension === 3 ? F * dz / r : 0;
+                });
+
+                // 更新速度
+                body.velocity.x += ax * dt;
+                body.velocity.y += ay * dt;
+                body.velocity.z += az * dt;
+            });
+
+            // 更新位置
+            bodies.forEach(body => {
+                body.position.x += body.velocity.x * dt;
+                body.position.y += body.velocity.y * dt;
+                if (dimension === 3) body.position.z += body.velocity.z * dt;
+
+                // 保存轨迹
+                body.trail.push({ x: body.position.x, y: body.position.y });
+                if (body.trail.length > 50) body.trail.shift();
+            });
+
+            // 绘制
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (trackedBodyIndex!== -1) {
+                const trackedBody = bodies[trackedBodyIndex];
+                offsetX = canvas.width / 2 - trackedBody.position.x;
+                offsetY = canvas.height / 2 - trackedBody.position.y;
+            }
+            bodies.forEach(body => {
+                // 绘制轨迹
+                ctx.beginPath();
+                body.trail.forEach((pos, i) => {
+                    const alpha = i / body.trail.length;
+                    ctx.strokeStyle = `${body.color}${Math.round(alpha * 15).toString(16)}`;
+                    if (i === 0) ctx.moveTo(pos.x + offsetX, pos.y + offsetY);
+                    else ctx.lineTo(pos.x + offsetX, pos.y + offsetY);
+                });
+                ctx.stroke();
+
+                // 绘制质点
+                ctx.fillStyle = body.color;
+                ctx.beginPath();
+                ctx.arc(body.position.x + offsetX, body.position.y + offsetY, Math.cbrt(body.mass) / 2, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // 更新数据面板
+            bodies.forEach((body, index) => {
+                const dataBody = document.querySelector(`[data-index="${index}"]`);
+                if (dataBody) {
+                    dataBody.querySelector('.posX').textContent = body.position.x.toFixed(2);
+                    dataBody.querySelector('.posY').textContent = body.position.y.toFixed(2);
+                    if (dimension === 3) {
+                        dataBody.querySelector('.posZ').textContent = body.position.z.toFixed(2);
+                    }
+                }
+            });
+
+            // 记录日志
+            const logEntry = bodies.map(body => `x: ${body.position.x.toFixed(2)}, y: ${body.position.y.toFixed(2)}, z: ${body.position.z.toFixed(2)}`).join(' | ');
+            log.push(logEntry);
+            document.getElementById('logPanel').innerHTML += `<p>${logEntry}</p>`;
+
+            requestAnimationFrame(update);
+        }
+
+        function createDataPanel() {
+            const panel = document.getElementById('dataPanel');
+            const dimension = parseInt(document.getElementById('dimension').value);
+            panel.innerHTML = bodies.map((body, index) => `
+        <div class="data-body" data-index="${index}">
+          <h4 style="color: ${body.color}">质点 ${index + 1}</h4>
+          <div>质量: ${body.mass.toFixed(1)}</div>
+          <div>位置X: <span class="posX">${body.position.x.toFixed(2)}</span></div>
+          <div>位置Y: <span class="posY">${body.position.y.toFixed(2)}</span></div>
+          ${dimension === 3 ?
+                `<div>位置Z: <span class="posZ">${body.position.z.toFixed(2)}</span></div>`
+                : ''}
+        </div>
+      `).join('');
+        }
+
+        function exportLog() {
+            const blob = new Blob([log.join('\n')], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'simulation_log.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function repeatSimulation() {
+            if (!lastSimulationParams) return;
+
+            document.getElementById('bodyCount').value = lastSimulationParams.bodyCount;
+            document.getElementById('dimension').value = lastSimulationParams.dimension;
+            document.getElementById('G').value = lastSimulationParams.G;
+            document.getElementById('dt').value = lastSimulationParams.dt;
+
+            const bodyParamsContainer = document.getElementById('bodyParamsContainer');
+            bodyParamsContainer.innerHTML = '';
+            for (let i = 0; i < lastSimulationParams.bodyCount; i++) {
+                const paramDiv = document.createElement('div');
+                paramDiv.classList.add('body-params');
+                paramDiv.id = `body${i + 1}`;
+                const param = lastSimulationParams.bodyParams[i];
+                paramDiv.innerHTML = `
+          <h4>质点 ${i + 1}</h4>
+          颜色: <input type="color" class="color" value="${param.color}">
+          质量: <input type="number" class="mass" value="${param.mass}" step="10">
+          位置X: <input type="number" class="posX" value="${param.posX}" step="10">
+          位置Y: <input type="number" class="posY" value="${param.posY}" step="10">
+          <span class="posZContainer">
+            位置Z: <input type="number" class="posZ" value="${param.posZ}" step="10">
+          </span>
+          速度X: <input type="number" class="velX" value="${param.velX}" step="0.1">
+          速度Y: <input type="number" class="velY" value="${param.velY}" step="0.1">
+          <span class="velZContainer">
+            速度Z: <input type="number" class="velZ" value="${param.velZ}" step="0.1">
+          </span>
+        `;
+                bodyParamsContainer.appendChild(paramDiv);
+            }
+
+            reset();
+        }
+
+        function exportSourceCode() {
+            if (!lastSimulationParams) return;
+
+            let sourceCode = `<!DOCTYPE html>
+<html>
+
+<head>
+  <title>三体运动模拟器</title>
+  <style>
+    canvas {
+      border: 1px solid #000;
+      float: left;
+      background-color: black;
+    }
+
+    .controls {
+      margin: 10px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      overflow: hidden;
+    }
+
+    .param-group {
+      margin: 5px 0;
+      padding: 5px;
+      border: 1px solid #ddd;
+    }
+
+    .body-params {
+      margin: 10px 0;
+      padding: 10px;
+      border: 1px solid #666;
+    }
+
+    .data-panel {
+      float: left;
+      margin-left: 20px;
+      padding: 10px;
+      border: 1px solid #999;
+      background: #333;
+      color: white;
+    }
+
+    .data-body {
+      margin: 10px 0;
+      padding: 5px;
+      border: 1px solid #444;
+    }
+
+    .data-body h4 {
+      margin: 0 0 5px 0;
+      color: #88f;
+    }
+
+    .log-panel {
+      float: left;
+      margin-left: 20px;
+      padding: 10px;
+      border: 1px solid #999;
+      background: #333;
+      color: white;
+      width: 200px;
+      height: 600px;
+      overflow-y: auto;
+    }
+
+    .view-controls {
+      margin: 10px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      float: left;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="controls">
+    <button onclick="toggleSimulation()">开始/暂停</button>
+    <button onclick="reset()">重置</button>
+    <button onclick="exportLog()">导出日志</button>
+    <button onclick="repeatSimulation()">重复模拟</button>
+    <button onclick="exportSourceCode()">导出源码</button>
+
+    <div class="param-group">
+      维度:
+      <select id="dimension" onchange="reset()">
+        <option value="2">2D</option>
+        <option value="3">3D</option>
+      </select>
+      质点数量:
+      <input type="number" id="bodyCount" value="${lastSimulationParams.bodyCount}" min="1" onchange="reset()">
+    </div>
+
+    <div class="param-group">
+      引力常数: <input type="number" id="G" value="${lastSimulationParams.G}" step="10">
+      时间步长: <input type="number" id="dt" value="${lastSimulationParams.dt}" step="0.01">
+    </div>
+
+    <div id="bodyParamsContainer">`;
+            lastSimulationParams.bodyParams.forEach((param, index) => {
+                sourceCode += `
+      <div class="body-params">
+        <h4>质点 ${index + 1}</h4>
+        颜色: <input type="color" class="color" value="${param.color}">
+        质量: <input type="number" class="mass" value="${param.mass}" step="10">
+        位置X: <input type="number" class="posX" value="${param.posX}" step="10">
+        位置Y: <input type="number" class="posY" value="${param.posY}" step="10">
+        <span class="posZContainer">
+          位置Z: <input type="number" class="posZ" value="${param.posZ}" step="10">
+        </span>
+        速度X: <input type="number" class="velX" value="${param.velX}" step="0.1">
+        速度Y: <input type="number" class="velY" value="${param.velY}" step="0.1">
+        <span class="velZContainer">
+          速度Z: <input type="number" class="velZ" value="${param.velZ}" step="0.1">
+        </span>
+      </div>`;
+            });
+            sourceCode += `
+    </div>
+
+    <div class="view-controls">
+      <button onclick="moveCanvas(-10, 0)">左移</button>
+      <button onclick="moveCanvas(10, 0)">右移</button>
+      <button onclick="moveCanvas(0, -10)">上移</button>
+      <button onclick="moveCanvas(0, 10)">下移</button>
+      <button onclick="resetView()">恢复初始视点</button>
+      <label for="trackedBody">追踪质点: </label>
+      <select id="trackedBody" onchange="setTrackedBody()">
+        <option value="-1">不追踪</option>`;
+            for (let i = 0; i < lastSimulationParams.bodyCount; i++) {
+                sourceCode += `<option value="${i}">质点 ${i + 1}</option>`;
+            }
+            sourceCode += `
+      </select>
+    </div>
+
+    <div id="dataPanel" class="data-panel"></div>
+    <div id="logPanel" class="log-panel"></div>
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <script>
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      let isRunning = false;
+      let bodies = [];
+      let log = [];
+      let lastSimulationParams = ${JSON.stringify(lastSimulationParams)};
+      let offsetX = 0;
+      let offsetY = 0;
+      let angleX = 0;
+      let angleY = 0;
+      let initialOffsetX = 0;
+      let initialOffsetY = 0;
+      let trackedBodyIndex = -1;
+
+      class Body {
+        constructor(mass, position, velocity, color) {
+          this.mass = mass;
+          this.position = position;
+          this.velocity = velocity;
+          this.color = color;
+          this.trail = [];
+        }
+      }
+
+      function toggleSimulation() {
+        isRunning = !isRunning;
+        if (isRunning) update();
+      }
+
+      function reset() {
+        const bodyCount = parseInt(document.getElementById('bodyCount').value);
+        const dimension = document.getElementById('dimension').value;
+        const G = parseFloat(document.getElementById('G').value);
+        const dt = parseFloat(document.getElementById('dt').value);
+
+        // 保存当前参数
+        lastSimulationParams = {
+          bodyCount,
+          dimension,
+          G,
+          dt,
+          bodyParams: []
+        };
+
+        // 控制参数面板显示
+        const bodyParamsContainer = document.getElementById('bodyParamsContainer');
+        bodyParamsContainer.innerHTML = '';
+        for (let i = 0; i < bodyCount; i++) {
+          const paramDiv = document.createElement('div');
+          paramDiv.classList.add('body-params');
+          paramDiv.id = \`body\${i + 1}\`;
+          paramDiv.innerHTML = \`
+            <h4>质点 \${i + 1}</h4>
+            颜色: <input type="color" class="color" value="${lastSimulationParams.bodyParams[i].color}">
+            质量: <input type="number" class="mass" value="${lastSimulationParams.bodyParams[i].mass}" step="10">
+            位置X: <input type="number" class="posX" value="${lastSimulationParams.bodyParams[i].posX}" step="10">
+            位置Y: <input type="number" class="posY" value="${lastSimulationParams.bodyParams[i].posY}" step="10">
+            <span class="posZContainer">
+              位置Z: <input type="number" class="posZ" value="${lastSimulationParams.bodyParams[i].posZ}" step="10">
+            </span>
+            速度X: <input type="number" class="velX" value="${lastSimulationParams.bodyParams[i].velX}" step="0.1">
+            速度Y: <input type="number" class="velY" value="${lastSimulationParams.bodyParams[i].velY}" step="0.1">
+            <span class="velZContainer">
+              速度Z: <input type="number" class="velZ" value="${lastSimulationParams.bodyParams[i].velZ}" step="0.1">
+            </span>
+          \`;
+          bodyParamsContainer.appendChild(paramDiv);
+        }
+
+        // 维度控制
+        document.querySelectorAll('.velZContainer, .posZContainer').forEach(container => {
+          container.style.display = dimension === '3'? 'inline' : 'none';
+        });
+
+        // 初始化质点
+        bodies = [];
+        document.querySelectorAll('.body-params').forEach((param, index) => {
+          if (index >= bodyCount) return;
+          const mass = parseFloat(param.querySelector('.mass').value);
+          const posX = parseFloat(param.querySelector('.posX').value);
+          const posY = parseFloat(param.querySelector('.posY').value);
+          const posZ = parseFloat(param.querySelector('.posZ').value);
+          const velX = parseFloat(param.querySelector('.velX').value);
+          const velY = parseFloat(param.querySelector('.velY').value);
+          const velZ = parseFloat(param.querySelector('.velZ').value);
+          const color = param.querySelector('.color').value;
+
+          bodies.push(new Body(
+            mass,
+            { x: posX, y: posY, z: posZ },
+            { x: velX, y: velY, z: velZ },
+            color
+          ));
+
+          lastSimulationParams.bodyParams.push({
+            mass,
+            posX,
+            posY,
+            posZ,
+            velX,
+            velY,
+            velZ,
+            color
+          });
+        });
+
+        // 添加实时位置更新事件
+        document.querySelectorAll('.body-params').forEach((param, index) => {
+          const updatePosition = () => {
+            if (index < bodies.length) {
+              bodies[index].position.x = parseFloat(param.querySelector('.posX').value);
+              bodies[index].position.y = parseFloat(param.querySelector('.posY').value);
+              bodies[index].position.z = parseFloat(param.querySelector('.posZ').value);
+            }
+          };
+          param.querySelectorAll('.posX, .posY, .posZ').forEach(input => {
+            input.addEventListener('input', updatePosition);
+          });
+        });
+
+        // 更新追踪质点选择框
+        const trackedBodySelect = document.getElementById('trackedBody');
+        trackedBodySelect.innerHTML = '<option value="-1">不追踪</option>';
+        for (let i = 0; i < bodyCount; i++) {
+          const option = document.createElement('option');
+          option.value = i;
+          option.textContent = \`质点 \${i + 1}\`;
+          trackedBodySelect.appendChild(option);
+        }
+
+        createDataPanel();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        log = [];
+        document.getElementById('logPanel').innerHTML = '';
+        offsetX = 0;
+        offsetY = 0;
+        initialOffsetX = 0;
+        initialOffsetY = 0;
+        trackedBodyIndex = -1;
+      }
+
+      function update() {
+        if (!isRunning) return;
+
+        const G = parseFloat(document.getElementById('G').value);
+        const dt = parseFloat(document.getElementById('dt').value);
+        const dimension = parseInt(document.getElementById('dimension').value);
+
+        // 计算加速度
+        bodies.forEach(body => {
+          let ax = 0, ay = 0, az = 0;
+          bodies.forEach(other => {
+            if (body === other) return;
+            const dx = other.position.x - body.position.x;
+            const dy = other.position.y - body.position.y;
+            const dz = dimension === 3? other.position.z - body.position.z : 0;
+            const r = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            const F = G * other.mass / (r * r + 1e-6);
+
+            ax += F * dx / r;
+            ay += F * dy / r;
+            az += dimension === 3? F * dz / r : 0;
+          });
+
+          // 更新速度
+          body.velocity.x += ax * dt;
+          body.velocity.y += ay * dt;
+          body.velocity.z += az * dt;
+        });
+
+        // 更新位置
+        bodies.forEach(body => {
+          body.position.x += body.velocity.x * dt;
+          body.position.y += body.velocity.y * dt;
+          if (dimension === 3) body.position.z += body.velocity.z * dt;
+
+          // 保存轨迹
+          body.trail.push({ x: body.position.x, y: body.position.y });
+          if (body.trail.length > 50) body.trail.shift();
+        });
+
+        // 绘制
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (trackedBodyIndex!== -1) {
+          const trackedBody = bodies[trackedBodyIndex];
+          offsetX = canvas.width / 2 - trackedBody.position.x;
+          offsetY = canvas.height / 2 - trackedBody.position.y;
+        }
+        bodies.forEach(body => {
+          // 绘制轨迹
+          ctx.beginPath();
+          body.trail.forEach((pos, i) => {
+            const alpha = i / body.trail.length;
+            ctx.strokeStyle = \`\${body.color}\${Math.round(alpha * 15).toString(16)}\`;
+            if (i === 0) ctx.moveTo(pos.x + offsetX, pos.y + offsetY);
+            else ctx.lineTo(pos.x + offsetX, pos.y + offsetY);
+          });
+          ctx.stroke();
+
+          // 绘制质点
+          ctx.fillStyle = body.color;
+          ctx.beginPath();
+          ctx.arc(body.position.x + offsetX, body.position.y + offsetY, Math.cbrt(body.mass) / 2, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        // 更新数据面板
+        bodies.forEach((body, index) => {
+          const dataBody = document.querySelector(\`[data-index="\${index}"]\`);
+          if (dataBody) {
+            dataBody.querySelector('.posX').textContent = body.position.x.toFixed(2);
+            dataBody.querySelector('.posY').textContent = body.position.y.toFixed(2);
+            if (dimension === 3) {
+              dataBody.querySelector('.posZ').textContent = body.position.z.toFixed(2);
+            }
+          }
+        });
+
+        // 记录日志
+        const logEntry = bodies.map(body => \`x: \${body.position.x.toFixed(2)}, y: \${body.position.y.toFixed(2)}, z: \${body.position.z.toFixed(2)}\`).join(' | ');
+        log.push(logEntry);
+        document.getElementById('logPanel').innerHTML += \`<p>\${logEntry}</p>\`;
+
+        requestAnimationFrame(update);
+      }
+
+      function createDataPanel() {
+        const panel = document.getElementById('dataPanel');
+        const dimension = parseInt(document.getElementById('dimension').value);
+        panel.innerHTML = bodies.map((body, index) => \`
+          <div class="data-body" data-index="\${index}">
+            <h4 style="color: \${body.color}">质点 \${index + 1}</h4>
+            <div>质量: \${body.mass.toFixed(1)}</div>
+            <div>位置X: <span class="posX">\${body.position.x.toFixed(2)}</span></div>
+            <div>位置Y: <span class="posY">\${body.position.y.toFixed(2)}</span></div>
+            \${dimension === 3?
+              \`<div>位置Z: <span class="posZ">\${body.position.z.toFixed(2)}</span></div>\`
+              : ''}
+          </div>
+        \`).join('');
+      }
+
+      function exportLog() {
+        const blob = new Blob([log.join('\n')], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'simulation_log.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      function repeatSimulation() {
+        if (!lastSimulationParams) return;
+
+        document.getElementById('bodyCount').value = lastSimulationParams.bodyCount;
+        document.getElementById('dimension').value = lastSimulationParams.dimension;
+        document.getElementById('G').value = lastSimulationParams.G;
+        document.getElementById('dt').value = lastSimulationParams.dt;
+
+        const bodyParamsContainer = document.getElementById('bodyParamsContainer');
+        bodyParamsContainer.innerHTML = '';
+        for (let i = 0; i < lastSimulationParams.bodyCount; i++) {
+          const paramDiv = document.createElement('div');
+          paramDiv.classList.add('body-params');
+          paramDiv.id = \`body\${i + 1}\`;
+          const param = lastSimulationParams.bodyParams[i];
+          paramDiv.innerHTML = \`
+            <h4>质点 \${i + 1}</h4

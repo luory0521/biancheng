@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器 Pro</title>
+    <style>
+        /* 保持原有样式不变，新增控制项样式 */
+        .control-group {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #444;
+        }
+        .vector-control {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+        }
+        input[type="number"] {
+            width: 80px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 在controls中添加引力常数控制 -->
+    <div class="controls">
+        <button onclick="toggleSimulation()">开始/暂停</button>
+        <button onclick="resetSystem()">重置</button>
+        <button onclick="toggleFullscreen()">全屏</button>
+        
+        <div class="control-group">
+            引力常数(G): <input type="number" id="gravity" value="6.67e-11" step="1e-11">
+        </div>
+        
+        <div class="control-group">
+            质点数量: 
+            <select id="bodyCount" onchange="updateBodyControls()">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+            </select>
+        </div>
+        
+        <!-- 增强后的质点控制面板 -->
+        <div id="bodyControls"></div>
+    </div>
+
+    <!-- 保持其他元素不变 -->
+
+<script>
+// 在Body类中添加速度属性
+class Body {
+    constructor(id) {
+        this.id = id;
+        this.mass = 1e24;
+        this.position = {x: 0, y: 0};
+        this.velocity = {x: 0, y: 0};
+        this.acceleration = {x: 0, y: 0};
+        this.color = `hsl(${id * 120}, 100%, 50%)`;
+        this.selected = false;
+        this.dragMode = 'position'; // 新增拖拽模式
+    }
+}
+
+// 创建增强版控制面板
+function createBodyControls() {
+    const container = document.getElementById('bodyControls');
+    let html = '';
+    for (let i = 0; i < 3; i++) {
+        html += `
+            <div class="control-group" data-id="${i}" style="display: ${i < 1 ? 'block' : 'none'}">
+                <h4 style="color: hsl(${i * 120}, 100%, 50%)">质点 ${i+1}</h4>
+                
+                <div class="vector-control">
+                    <div>质量(kg): 
+                        <input type="number" value="1e24" 
+                               onchange="updateBodyProperty(${i}, 'mass', this.value)">
+                    </div>
+                    <div>颜色: 
+                        <input type="color" value="${hslToHex(i * 120, 100, 50)}" 
+                               onchange="updateBodyColor(${i}, this.value)">
+                    </div>
+                </div>
+
+                <div class="vector-control">
+                    <div>
+                        位置X(m): <input type="number" 
+                                   onchange="updateBodyProperty(${i}, 'position.x', this.value)">
+                    </div>
+                    <div>
+                        位置Y(m): <input type="number" 
+                                   onchange="updateBodyProperty(${i}, 'position.y', this.value)">
+                    </div>
+                </div>
+
+                <div class="vector-control">
+                    <div>
+                        速度X(m/s): <input type="number" value="0" 
+                                     onchange="updateBodyProperty(${i}, 'velocity.x', this.value)">
+                    </div>
+                    <div>
+                        速度Y(m/s): <input type="number" value="0" 
+                                     onchange="updateBodyProperty(${i}, 'velocity.y', this.value)">
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    container.innerHTML = html;
+}
+
+// 新增属性更新函数
+function updateBodyProperty(id, prop, value) {
+    const body = bodies[id];
+    const path = prop.split('.');
+    if (path.length === 1) {
+        body[prop] = parseFloat(value);
+    } else {
+        body[path][path] = parseFloat(value);
+    }
+}
+
+// 修改后的拖拽处理逻辑
+function startDrag(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = (e.clientX - offset.x - rect.left) / scale;
+    const mouseY = (e.clientY - offset.y - rect.top) / scale;
+    
+    selectedBody = bodies.find(body => 
+        Math.hypot(body.position.x - mouseX, body.position.y - mouseY) < Math.sqrt(body.mass)/1e12
+    );
+    
+    if (selectedBody) {
+        selectedBody.selected = true;
+        // 根据按键切换拖拽模式
+        if (e.button === 0) { // 左键拖位置
+            selectedBody.dragMode = 'position';
+        } else if (e.button === 2) { // 右键拖速度
+            selectedBody.dragMode = 'velocity';
+            selectedBody.dragStart = {x: mouseX, y: mouseY};
+        }
+    } else {
+        // 视图拖拽逻辑保持不变
+    }
+}
+
+function handleDrag(e) {
+    if (selectedBody) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = (e.clientX - offset.x - rect.left) / scale;
+        const mouseY = (e.clientY - offset.y - rect.top) / scale;
+        
+        if (selectedBody.dragMode === 'position') {
+            selectedBody.position.x = mouseX;
+            selectedBody.position.y = mouseY;
+        } else if (selectedBody.dragMode === 'velocity') {
+            const dx = mouseX - selectedBody.dragStart.x;
+            const dy = mouseY - selectedBody.dragStart.y;
+            selectedBody.velocity.x = dx * 1e3; // 比例系数
+            selectedBody.velocity.y = dy * 1e3;
+        }
+    }
+    // 视图拖拽逻辑保持不变
+}
+
+// 在物理计算中使用可调引力常数
+function calculatePhysics() {
+    const G = parseFloat(document.getElementById('gravity').value);
+    
+    bodies.forEach(body => {
+        body.acceleration = {x: 0, y: 0};
+        bodies.forEach(other => {
+            if (body === other) return;
+            
+            const dx = other.position.x - body.position.x;
+            const dy = other.position.y - body.position.y;
+            const r = Math.sqrt(dx*dx + dy*dy) || 1e6; // 防止除零
+            const F = G * other.mass / (r*r);
+            
+            body.acceleration.x += F * dx / r;
+            body.acceleration.y += F * dy / r;
+        });
+    });
+}
+
+// 工具函数：HSL转HEX
+function hslToHex(h, s, l) {
+    l /= 100;
+    const a = s * Math.min(l, 1 - l) / 100;
+    const f = n => {
+        const k = (n + h/30) % 12;
+        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * color).toString(16).padStart(2, '0');
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+// 保持其他函数不变
+</script>
+</body>
+</html>

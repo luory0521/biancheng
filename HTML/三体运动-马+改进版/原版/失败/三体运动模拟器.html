@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        canvas { border: 1px solid #000; }
+        .control-panel { margin: 10px; padding: 10px; border: 1px solid #ccc; }
+        .param-group { margin: 5px; padding: 5px; border-bottom: 1px dashed #ddd; }
+        input[type="number"] { width: 60px; }
+    </style>
+</head>
+<body>
+    <div class="control-panel">
+        <div>
+            <button onclick="toggleMode()">切换2D/3D模式</button>
+            当前模式: <span id="modeDisplay">3D</span>
+            <button onclick="toggleRunning()">{{running ? '暂停' : '开始'}}</button>
+            <button onclick="reset()">重置</button>
+        </div>
+        
+        <div class="param-group">
+            质点数量: 
+            <select id="bodyCount" onchange="createParameterInputs()">
+                <option>1</option>
+                <option>2</option>
+                <option selected>3</option>
+            </select>
+            时间步长: <input type="number" id="timeStep" value="0.01" step="0.001">
+        </div>
+
+        <div id="parameters"></div>
+    </div>
+
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <script>
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let is3D = true;
+        let bodies = [];
+        let running = false;
+        let trail = [];
+
+        class Body {
+            constructor(mass, x, y, z, vx, vy, vz, color) {
+                this.mass = mass;
+                this.position = {x, y, z};
+                this.velocity = {x: vx, y: vy, z: vz};
+                this.color = color;
+            }
+        }
+
+        // 初始化示例参数
+        function initializeExample() {
+            bodies = [
+                new Body(100, 300, 300, 0, 0, 0, 0, '#FF0000'),
+                new Body(100, 500, 300, 0, 0, -1, 0, '#00FF00'),
+                new Body(100, 300, 500, 0, 1, 0, 0, '#0000FF')
+            ];
+        }
+
+        function createParameterInputs() {
+            let count = parseInt(document.getElementById('bodyCount').value);
+            let container = document.getElementById('parameters');
+            container.innerHTML = '';
+            
+            for (let i = 0; i < count; i++) {
+                container.innerHTML += `
+                    <div class="param-group">
+                        质点 ${i+1}:
+                        质量 <input type="number" id="m${i}" value="100">
+                        X <input type="number" id="x${i}" value="${300 + i*50}">
+                        Y <input type="number" id="y${i}" value="${300 + i*50}">
+                        ${is3D ? `Z <input type="number" id="z${i}" value="0">` : ''}
+                        VX <input type="number" id="vx${i}" value="${i-0.5}">
+                        VY <input type="number" id="vy${i}" value="${0.5-i}">
+                        ${is3D ? `VZ <input type="number" id="vz${i}" value="0">` : ''}
+                        颜色 <input type="color" value="#${((1<<24)*Math.random()|0).toString(16)}">
+                    </div>`;
+            }
+        }
+
+        function updateBodies() {
+            let count = parseInt(document.getElementById('bodyCount').value);
+            bodies = [];
+            
+            for (let i = 0; i < count; i++) {
+                bodies.push(new Body(
+                    parseFloat(document.getElementById(`m${i}`).value),
+                    parseFloat(document.getElementById(`x${i}`).value),
+                    parseFloat(document.getElementById(`y${i}`).value),
+                    is3D ? parseFloat(document.getElementById(`z${i}`).value) : 0,
+                    parseFloat(document.getElementById(`vx${i}`).value),
+                    parseFloat(document.getElementById(`vy${i}`).value),
+                    is3D ? parseFloat(document.getElementById(`vz${i}`).value) : 0,
+                    document.querySelector(`#parameters input[type="color"]:nth-child(${i+1})`).value
+                ));
+            }
+        }
+
+        function calculateForces() {
+            let dt = parseFloat(document.getElementById('timeStep').value);
+            
+            // 计算引力
+            for (let i = 0; i < bodies.length; i++) {
+                let a = {x: 0, y: 0, z: 0};
+                
+                for (let j = 0; j < bodies.length; j++) {
+                    if (i === j) continue;
+                    let dx = bodies[j].position.x - bodies[i].position.x;
+                    let dy = bodies[j].position.y - bodies[i].position.y;
+                    let dz = bodies[j].position.z - bodies[i].position.z;
+                    let r = Math.sqrt(dx*dx + dy*dy + dz*dz) + 1; // 避免除以0
+                    let F = bodies[j].mass / (r*r);
+                    
+                    a.x += F * dx/r;
+                    a.y += F * dy/r;
+                    a.z += F * dz/r;
+                }
+                
+                // 更新速度
+                bodies[i].velocity.x += a.x * dt;
+                bodies[i].velocity.y += a.y * dt;
+                bodies[i].velocity.z += a.z * dt;
+            }
+            
+            // 更新位置
+            for (let body of bodies) {
+                body.position.x += body.velocity.x * dt;
+                body.position.y += body.velocity.y * dt;
+                body.position.z += body.velocity.z * dt;
+            }
+        }
+
+        function draw() {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 绘制轨迹
+            trail.push(bodies.map(b => ({...b.position})));
+            if (trail.length > 50) trail.shift();
+            
+            trail.forEach((positions, index) => {
+                positions.forEach((pos, i) => {
+                    ctx.beginPath();
+                    ctx.arc(
+                        pos.x, 
+                        pos.y, 
+                        3, 
+                        0, Math.PI*2
+                    );
+                    ctx.fillStyle = bodies[i].color + Math.round(30 + index*2).toString(16).padStart(2, '0');
+                    ctx.fill();
+                });
+            });
+
+            // 绘制质点
+            bodies.forEach(body => {
+                ctx.beginPath();
+                ctx.arc(body.position.x, body.position.y, Math.sqrt(body.mass)/3, 0, Math.PI*2);
+                ctx.fillStyle = body.color;
+                ctx.fill();
+                
+                if (is3D) {
+                    // 绘制z轴深度指示器
+                    ctx.beginPath();
+                    ctx.arc(body.position.x, body.position.y, 5 + body.position.z/10, 0, Math.PI*2);
+                    ctx.strokeStyle = body.color;
+                    ctx.stroke();
+                }
+            });
+        }
+
+        function animate() {
+            if (!running) return;
+            calculateForces();
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        function toggleMode() {
+            is3D = !is3D;
+            document.getElementById('modeDisplay').textContent = is3D ? '3D' : '2D';
+            createParameterInputs();
+        }
+
+        function toggleRunning() {
+            running = !running;
+            if (running) animate();
+        }
+
+        function reset() {
+            running = false;
+            initializeExample();
+            createParameterInputs();
+            draw();
+        }
+
+        // 初始化
+        initializeExample();
+        createParameterInputs();
+        draw();
+    </script>
+</body>

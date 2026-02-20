@@ -1,0 +1,226 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: black;
+            display: flex;
+        }
+        canvas {
+            cursor: grab;
+        }
+        #panel {
+            width: 300px;
+            height: 100vh;
+            background: rgba(255,255,255,0.9);
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .particle-control {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="panel"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const panel = document.getElementById('panel');
+
+// 系统参数
+let scale = 1;
+let offset = {x: 0, y: 0};
+let particles = [];
+let selectedParticle = null;
+let dragMode = 'position';
+
+class Particle {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.ax = 0;
+        this.ay = 0;
+        this.mass = 100;
+        this.color = `hsl(${Math.random()*360}, 100%, 50%)`;
+        this.radius = 8;
+    }
+}
+
+// 初始化示例粒子
+for (let i = 0; i < 3; i++) {
+    particles.push(new Particle(
+        Math.random() * canvas.width,
+        Math.random() * canvas.height
+    ));
+}
+
+// 坐标转换
+function screenToWorld(x, y) {
+    return {
+        x: (x - offset.x) / scale,
+        y: (y - offset.y) / scale
+    };
+}
+
+// 物理计算
+function calculateForces() {
+    const G = 6.67430e-11;
+    
+    for (let p1 of particles) {
+        p1.ax = p1.ay = 0;
+        for (let p2 of particles) {
+            if (p1 === p2) continue;
+            
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const r = Math.sqrt(dx*dx + dy*dy);
+            const F = G * p1.mass * p2.mass / (r*r + 1e-5);
+            
+            p1.ax += F * dx / (r * p1.mass);
+            p1.ay += F * dy / (r * p1.mass);
+        }
+    }
+}
+
+// 渲染
+function draw() {
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.translate(offset.x, offset.y);
+    ctx.scale(scale, scale);
+    
+    particles.forEach(p => {
+        // 绘制轨迹
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        
+        // 绘制速度矢量
+        ctx.strokeStyle = 'white';
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x + p.vx*10, p.y + p.vy*10);
+        ctx.stroke();
+    });
+    
+    ctx.restore();
+}
+
+// 更新循环
+function update() {
+    calculateForces();
+    
+    particles.forEach(p => {
+        p.vx += p.ax;
+        p.vy += p.ay;
+        p.x += p.vx;
+        p.y += p.vy;
+    });
+    
+    draw();
+    updatePanel();
+    requestAnimationFrame(update);
+}
+
+// 控制面板
+function createPanel() {
+    panel.innerHTML = '';
+    particles.forEach((p, i) => {
+        const div = document.createElement('div');
+        div.className = 'particle-control';
+        div.innerHTML = `
+            <h3>质点 ${i+1}</h3>
+            <input type="color" value="${p.color}" onchange="particles[${i}].color=this.value">
+            质量: <input type="number" value="${p.mass}" onchange="particles[${i}].mass=parseFloat(this.value)">
+            <div>位置: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})</div>
+            <div>速度: (${p.vx.toFixed(1)}, ${p.vy.toFixed(1)})</div>
+            <div>加速度: (${p.ax.toFixed(3)}, ${p.ay.toFixed(3)})</div>
+        `;
+        panel.appendChild(div);
+    });
+}
+
+function updatePanel() {
+    document.querySelectorAll('.particle-control').forEach((div, i) => {
+        const p = particles[i];
+        div.querySelector('input[type="color"]').value = p.color;
+        div.querySelector('input[type="number"]').value = p.mass;
+        div.children.textContent = `位置: (${p.x.toFixed(1)}, ${p.y.toFixed(1)})`;
+        div.children.textContent = `速度: (${p.vx.toFixed(1)}, ${p.vy.toFixed(1)})`;
+        div.children.textContent = `加速度: (${p.ax.toFixed(3)}, ${p.ay.toFixed(3)})`;
+    });
+}
+
+// 事件监听
+canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const zoom = 1 + e.deltaY * -0.001;
+    scale *= zoom;
+});
+
+canvas.addEventListener('mousedown', e => {
+    const pos = screenToWorld(e.offsetX, e.offsetY);
+    selectedParticle = particles.find(p => 
+        Math.hypot(p.x - pos.x, p.y - pos.y) < p.radius
+    );
+    
+    if (selectedParticle) {
+        canvas.style.cursor = 'grabbing';
+        if (e.shiftKey) dragMode = 'velocity';
+    }
+});
+
+canvas.addEventListener('mousemove', e => {
+    if (selectedParticle) {
+        const pos = screenToWorld(e.offsetX, e.offsetY);
+        if (dragMode === 'position') {
+            selectedParticle.x = pos.x;
+            selectedParticle.y = pos.y;
+        } else {
+            selectedParticle.vx = (pos.x - selectedParticle.x) / 10;
+            selectedParticle.vy = (pos.y - selectedParticle.y) / 10;
+        }
+    }
+});
+
+canvas.addEventListener('mouseup', () => {
+    selectedParticle = null;
+    canvas.style.cursor = 'grab';
+    dragMode = 'position';
+});
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+
+// 初始化
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+createPanel();
+update();
+
+// 控制按钮
+document.body.insertAdjacentHTML('beforeend', `
+    <div style="position:fixed; top:10px; left:10px">
+        <button onclick="particles=particles.slice(0,-1)">移除质点</button>
+        <button onclick="particles.push(new Particle(canvas.width/2, canvas.height/2))">添加质点</button>
+    </div>
+`);
+</script>
+</body>
+</html>

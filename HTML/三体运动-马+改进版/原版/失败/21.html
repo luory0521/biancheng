@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 20px;
+        }
+        canvas {
+            border: 2px solid #444;
+            border-radius: 8px;
+        }
+        .controls {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .particle-control {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #333;
+            border-radius: 6px;
+        }
+        input[type="range"] {
+            width: 100%;
+            margin: 5px 0;
+        }
+        #dataPanel {
+            margin-top: 20px;
+            padding: 15px;
+            background: #333;
+            border-radius: 6px;
+            font-family: monospace;
+        }
+        button {
+            background: #4CAF50;
+            border: none;
+            padding: 10px 20px;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="simCanvas" width="800" height="600"></canvas>
+        <div class="controls">
+            <div class="particle-control" id="particle1">
+                <h3>质点 1</h3>
+                <label>颜色 <input type="color" value="#ff0000"></label>
+                <label>X <input type="range" class="posX" min="0" max="800" value="400"></label>
+                <label>Y <input type="range" class="posY" min="0" max="600" value="300"></label>
+                <label>质量 <input type="range" class="mass" min="1" max="100" value="50"></label>
+                <label>速度 <input type="range" class="speed" min="0" max="100" value="0"></label>
+                <label>角度 <input type="range" class="angle" min="0" max="360" value="90"></label>
+            </div>
+            <!-- 重复类似结构用于质点2和3 -->
+            <div class="controls-buttons">
+                <button id="startBtn">开始</button>
+                <button id="resetBtn">重置</button>
+            </div>
+            <div id="dataPanel"></div>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById('simCanvas');
+const ctx = canvas.getContext('2d');
+const G = 100; // 引力常数
+let particles = [];
+let isRunning = false;
+
+class Particle {
+    constructor(id) {
+        this.id = id;
+        this.color = '#ff0000';
+        this.pos = { x: 400, y: 300 };
+        this.mass = 50;
+        this.velocity = { x: 0, y: 0 };
+        this.acceleration = { x: 0, y: 0 };
+        this.trail = [];
+    }
+
+    updateFromControls() {
+        const control = document.getElementById(`particle${this.id}`);
+        this.color = control.querySelector('input[type="color"]').value;
+        this.pos.x = parseInt(control.querySelector('.posX').value);
+        this.pos.y = parseInt(control.querySelector('.posY').value);
+        this.mass = parseInt(control.querySelector('.mass').value);
+        
+        const speed = parseInt(control.querySelector('.speed').value);
+        const angle = parseInt(control.querySelector('.angle').value) * Math.PI / 180;
+        this.velocity.x = speed * Math.cos(angle);
+        this.velocity.y = speed * Math.sin(angle);
+    }
+
+    calculateAcceleration(others) {
+        this.acceleration = { x: 0, y: 0 };
+        for (const other of others) {
+            if (other === this) continue;
+            
+            const dx = other.pos.x - this.pos.x;
+            const dy = other.pos.y - this.pos.y;
+            const r = Math.sqrt(dx*dx + dy*dy + 100); // 软化长度
+            
+            const F = G * this.mass * other.mass / (r*r);
+            this.acceleration.x += F * dx / (r * this.mass);
+            this.acceleration.y += F * dy / (r * this.mass);
+        }
+    }
+
+    updatePosition(dt) {
+        this.velocity.x += this.acceleration.x * dt;
+        this.velocity.y += this.acceleration.y * dt;
+        this.pos.x += this.velocity.x * dt;
+        this.pos.y += this.velocity.y * dt;
+        
+        // 记录轨迹
+        this.trail.push({x: this.pos.x, y: this.pos.y});
+        if (this.trail.length > 100) this.trail.shift();
+    }
+
+    draw() {
+        // 绘制轨迹
+        ctx.beginPath();
+        this.trail.forEach((pos, i) => {
+            ctx.fillStyle = `${this.color}${Math.round(i/100*30).toString(16)}`;
+            ctx.fillRect(pos.x, pos.y, 2, 2);
+        });
+
+        // 绘制质点
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, Math.sqrt(this.mass), 0, Math.PI*2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+    }
+}
+
+function initializeParticles() {
+    particles = [new Particle(1), new Particle(2), new Particle(3)];
+    particles.forEach(p => p.updateFromControls());
+}
+
+function updateDataPanel() {
+    let data = '';
+    particles.forEach(p => {
+        data += `质点 ${p.id}:
+位置: (${p.pos.x.toFixed(1)}, ${p.pos.y.toFixed(1)})
+速度: ${Math.hypot(p.velocity.x, p.velocity.y).toFixed(1)} px/s
+质量: ${p.mass}
+------------------------\n`;
+    });
+    document.getElementById('dataPanel').textContent = data;
+}
+
+function simulationStep() {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 计算相互作用力
+    particles.forEach(p => p.calculateAcceleration(particles));
+    
+    // 更新位置
+    const dt = 0.016; // 约60fps
+    particles.forEach(p => p.updatePosition(dt));
+    
+    // 绘制
+    particles.forEach(p => p.draw());
+    
+    updateDataPanel();
+    
+    if (isRunning) requestAnimationFrame(simulationStep);
+}
+
+document.getElementById('startBtn').addEventListener('click', () => {
+    if (!isRunning) {
+        isRunning = true;
+        simulationStep();
+        document.getElementById('startBtn').textContent = '暂停';
+    } else {
+        isRunning = false;
+        document.getElementById('startBtn').textContent = '继续';
+    }
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+    isRunning = false;
+    initializeParticles();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    document.getElementById('startBtn').textContent = '开始';
+    updateDataPanel();
+});
+
+// 初始化
+initializeParticles();
+updateDataPanel();
+</script>
+</body>
+</html>

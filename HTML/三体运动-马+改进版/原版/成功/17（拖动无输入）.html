@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        body { display: flex; margin: 0; padding: 20px; background: #1a1a1a; color: white; }
+        #canvas { border: 2px solid #444; background: #000; }
+        .panel { margin-left: 20px; width: 300px; }
+        .control-group { margin-bottom: 15px; }
+        input[type="number"] { width: 80px; margin: 5px; }
+        .data-panel { background: #333; padding: 10px; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    
+    <div class="panel">
+        <div class="control-group">
+            <button onclick="addBody()">添加质点</button>
+            <button onclick="clearBodies()">清空质点</button>
+        </div>
+        
+        <div class="data-panel" id="dataPanel"></div>
+        
+        <div class="control-group">
+            <h4>当前选中质点: <span id="selectedBody">无</span></h4>
+            <input type="color" id="colorInput" onchange="updateSelectedBody()">
+            <input type="number" id="massInput" step="0.1" onchange="updateSelectedBody()">
+            <button onclick="startVelAdjust()">设置速度</button>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const G = 1000; // 引力常数
+
+let bodies = [];
+let selectedBody = null;
+let isDragging = false;
+let isSettingVelocity = false;
+
+class Body {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.mass = 100;
+        this.vx = 0;
+        this.vy = 0;
+        this.ax = 0;
+        this.ay = 0;
+        this.color = `hsl(${Math.random()*360}, 100%, 50%)`;
+        this.radius = 10;
+    }
+}
+
+function addBody() {
+    const body = new Body(canvas.width/2, canvas.height/2);
+    bodies.push(body);
+    selectedBody = body;
+    updateUI();
+}
+
+function clearBodies() {
+    bodies = [];
+    selectedBody = null;
+}
+
+function updateSelectedBody() {
+    if (!selectedBody) return;
+    selectedBody.color = document.getElementById('colorInput').value;
+    selectedBody.mass = parseFloat(document.getElementById('massInput').value);
+}
+
+function startVelAdjust() {
+    isSettingVelocity = true;
+}
+
+function calculateAcceleration() {
+    for (let body of bodies) {
+        body.ax = 0;
+        body.ay = 0;
+        
+        for (let other of bodies) {
+            if (body === other) continue;
+            
+            const dx = other.x - body.x;
+            const dy = other.y - body.y;
+            const distSq = dx*dx + dy*dy;
+            const dist = Math.sqrt(distSq);
+            const force = G * body.mass * other.mass / (distSq + 100); // 避免除以零
+            
+            if (dist > 0) {
+                body.ax += force * dx / (dist * body.mass);
+                body.ay += force * dy / (dist * body.mass);
+            }
+        }
+    }
+}
+
+function updatePhysics(dt) {
+    calculateAcceleration();
+    
+    for (let body of bodies) {
+        body.vx += body.ax * dt;
+        body.vy += body.ay * dt;
+        body.x += body.vx * dt;
+        body.y += body.vy * dt;
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // 绘制质点
+    for (let body of bodies) {
+        ctx.beginPath();
+        ctx.arc(body.x, body.y, body.radius, 0, Math.PI*2);
+        ctx.fillStyle = body.color;
+        ctx.fill();
+    }
+    
+    // 绘制速度向量
+    if (selectedBody && isSettingVelocity) {
+        ctx.beginPath();
+        ctx.moveTo(selectedBody.x, selectedBody.y);
+        ctx.lineTo(selectedBody.x + selectedBody.vx*10, selectedBody.y + selectedBody.vy*10);
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+    }
+}
+
+function updateUI() {
+    // 更新数据面板
+    let html = "<h3>质点数据:</h3>";
+    bodies.forEach((body, i) => {
+        html += `
+            <div>质点 ${i+1}:
+                m: ${body.mass.toFixed(1)},
+                pos: (${body.x.toFixed(0)}, ${body.y.toFixed(0)})
+                vel: (${body.vx.toFixed(1)}, ${body.vy.toFixed(1)})
+                acc: (${body.ax.toFixed(1)}, ${body.ay.toFixed(1)})
+            </div>`;
+    });
+    document.getElementById('dataPanel').innerHTML = html;
+
+    // 更新控制面板
+    if (selectedBody) {
+        document.getElementById('selectedBody').textContent = bodies.indexOf(selectedBody) + 1;
+        document.getElementById('colorInput').value = selectedBody.color;
+        document.getElementById('massInput').value = selectedBody.mass;
+    }
+}
+
+// 鼠标事件处理
+canvas.addEventListener('mousedown', e => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // 查找点击的质点
+    for (let body of bodies) {
+        const dx = x - body.x;
+        const dy = y - body.y;
+        if (dx*dx + dy*dy < body.radius**2) {
+            selectedBody = body;
+            isDragging = true;
+            if (isSettingVelocity) {
+                body.vx = 0;
+                body.vy = 0;
+            }
+            return;
+        }
+    }
+});
+
+canvas.addEventListener('mousemove', e => {
+    if (!isDragging || !selectedBody) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    selectedBody.x = e.clientX - rect.left;
+    selectedBody.y = e.clientY - rect.top;
+    
+    if (isSettingVelocity) {
+        selectedBody.vx = (e.movementX) * 0.5;
+        selectedBody.vy = (e.movementY) * 0.5;
+    }
+});
+
+canvas.addEventListener('mouseup', () => {
+    isDragging = false;
+    isSettingVelocity = false;
+});
+
+// 动画循环
+let lastTime = 0;
+function animate(timestamp) {
+    const dt = (timestamp - lastTime) / 1000;
+    lastTime = timestamp;
+    
+    if (dt < 0.1) {
+        updatePhysics(dt);
+    }
+    
+    draw();
+    updateUI();
+    requestAnimationFrame(animate);
+}
+
+animate(0);
+</script>
+</body>
+</html>

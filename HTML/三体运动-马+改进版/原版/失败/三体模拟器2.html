@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器 - 增强版</title>
+    <style>
+        canvas { border: 1px solid #000; background: #000; }
+        .control-panel { margin: 10px; padding: 10px; border: 1px solid #444; background: #333; color: #fff; }
+        .param-group { margin: 5px; padding: 5px; border-bottom: 1px dashed #666; }
+        input[type="number"] { width: 60px; background: #222; color: #fff; border: 1px solid #444; }
+        button { background: #444; color: #fff; border: 1px solid #666; padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <div class="control-panel">
+        <div>
+            <button onclick="toggleMode()">切换2D/3D模式</button>
+            当前模式: <span id="modeDisplay">3D</span>
+            <button id="startBtn" onclick="toggleRunning()">开始</button>
+            <button onclick="reset()">重置</button>
+        </div>
+        
+        <div class="param-group">
+            质点数量: 
+            <select id="bodyCount" onchange="createParameterInputs()">
+                <option>1</option>
+                <option>2</option>
+                <option selected>3</option>
+            </select>
+            时间步长: <input type="number" id="timeStep" value="0.01" step="0.001" min="0.001" max="0.1">
+        </div>
+
+        <div id="parameters"></div>
+    </div>
+
+    <canvas id="canvas" width="1200" height="800"></canvas>
+
+    <script>
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let is3D = true;
+        let bodies = [];
+        let running = false;
+        let trail = [];
+        const G = 0.5; // 引力常数
+
+        class Body {
+            constructor(mass, x, y, z, vx, vy, vz, color) {
+                this.mass = Math.max(1, mass);
+                this.position = {x, y, z};
+                this.velocity = {x: vx, y: vy, z: vz};
+                this.color = color || '#FFFFFF';
+            }
+        }
+
+        // 增强的初始化示例
+        function initializeExample() {
+            bodies = [
+                new Body(150, 500, 400, 0, 0, -0.5, 0, '#FF5555'),
+                new Body(200, 700, 400, 0, 0, 0.5, 0, '#55FF55'),
+                new Body(100, 600, 600, 0, 0.3, 0, 0, '#5555FF')
+            ];
+        }
+
+        // 改进的参数输入生成
+        function createParameterInputs() {
+            let count = parseInt(document.getElementById('bodyCount').value);
+            let container = document.getElementById('parameters');
+            container.innerHTML = '';
+            
+            for (let i = 0; i < count; i++) {
+                container.innerHTML += `
+                    <div class="param-group">
+                        质点 ${i+1}:
+                        质量 <input type="number" id="m${i}" value="${bodies[i]?.mass || 100}" min="1">
+                        X <input type="number" id="x${i}" value="${bodies[i]?.position.x || 400}">
+                        Y <input type="number" id="y${i}" value="${bodies[i]?.position.y || 300}">
+                        ${is3D ? `Z <input type="number" id="z${i}" value="${bodies[i]?.position.z || 0}">` : ''}
+                        VX <input type="number" id="vx${i}" value="${bodies[i]?.velocity.x || 0}" step="0.1">
+                        VY <input type="number" id="vy${i}" value="${bodies[i]?.velocity.y || 0}" step="0.1">
+                        ${is3D ? `VZ <input type="number" id="vz${i}" value="${bodies[i]?.velocity.z || 0}" step="0.1">` : ''}
+                        颜色 <input type="color" value="${bodies[i]?.color || '#ffffff'}">
+                    </div>`;
+            }
+        }
+
+        // 增强的参数更新
+        function updateBodies() {
+            let count = parseInt(document.getElementById('bodyCount').value);
+            bodies = [];
+            
+            for (let i = 0; i < count; i++) {
+                const inputs = {
+                    mass: parseFloat(document.getElementById(`m${i}`).value),
+                    x: parseFloat(document.getElementById(`x${i}`).value),
+                    y: parseFloat(document.getElementById(`y${i}`).value),
+                    z: is3D ? parseFloat(document.getElementById(`z${i}`).value) : 0,
+                    vx: parseFloat(document.getElementById(`vx${i}`).value),
+                    vy: parseFloat(document.getElementById(`vy${i}`).value),
+                    vz: is3D ? parseFloat(document.getElementById(`vz${i}`).value) : 0,
+                    color: document.querySelector(`#parameters input[type="color"]:nth-child(${i+1})`).value
+                };
+
+                // 参数有效性验证
+                if ([inputs.mass, inputs.x, inputs.y].some(isNaN)) {
+                    alert(`参数错误: 质点 ${i+1} 包含无效数值`);
+                    return false;
+                }
+
+                bodies.push(new Body(
+                    inputs.mass,
+                    inputs.x,
+                    inputs.y,
+                    inputs.z,
+                    inputs.vx,
+                    inputs.vy,
+                    inputs.vz,
+                    inputs.color
+                ));
+            }
+            return true;
+        }
+
+        // 改进的物理计算
+        function calculateForces() {
+            const dt = Math.max(0.001, Math.min(0.1, 
+                parseFloat(document.getElementById('timeStep').value)));
+            
+            for (let i = 0; i < bodies.length; i++) {
+                let ax = 0, ay = 0, az = 0;
+                
+                for (let j = 0; j < bodies.length; j++) {
+                    if (i === j) continue;
+                    const dx = bodies[j].position.x - bodies[i].position.x;
+                    const dy = bodies[j].position.y - bodies[i].position.y;
+                    const dz = bodies[j].position.z - bodies[i].position.z;
+                    const rSq = dx*dx + dy*dy + dz*dz + 1; // 避免除以零
+                    const F = G * bodies[j].mass / rSq;
+                    const r = Math.sqrt(rSq);
+
+                    ax += F * dx/r;
+                    ay += F * dy/r;
+                    az += F * dz/r;
+                }
+                
+                bodies[i].velocity.x += ax * dt;
+                bodies[i].velocity.y += ay * dt;
+                bodies[i].velocity.z += az * dt;
+            }
+
+            bodies.forEach(body => {
+                body.position.x += body.velocity.x * dt;
+                body.position.y += body.velocity.y * dt;
+                body.position.z += body.velocity.z * dt;
+            });
+        }
+
+        // 优化的绘制方法
+        function draw() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 轨迹绘制
+            trail.push(bodies.map(b => ({...b.position})));
+            if (trail.length > 100) trail.shift();
+            
+            trail.forEach((positions, index) => {
+                positions.forEach((pos, i) => {
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, 2, 0, Math.PI*2);
+                    ctx.fillStyle = bodies[i].color + Math.round(20 + index*2).toString(16).padStart(2, '0');
+                    ctx.fill();
+                });
+            });
+
+            // 绘制物体
+            bodies.forEach(body => {
+                ctx.beginPath();
+                ctx.arc(body.position.x, body.position.y, 
+                       Math.sqrt(body.mass)/5, 0, Math.PI*2);
+                ctx.fillStyle = body.color;
+                ctx.fill();
+
+                if (is3D) {
+                    ctx.beginPath();
+                    const depth = 5 + Math.min(50, Math.abs(body.position.z))/5;
+                    ctx.arc(body.position.x, body.position.y, depth, 0, Math.PI*2);
+                    ctx.strokeStyle = body.color;
+                    ctx.stroke();
+                }
+            });
+        }
+
+        // 稳定的动画循环
+        function animate() {
+            if (!running) return;
+            try {
+                if (updateBodies()) {
+                    calculateForces();
+                    draw();
+                }
+            } catch (e) {
+                console.error("模拟错误:", e);
+                toggleRunning();
+            }
+            requestAnimationFrame(animate);
+        }
+
+        // 改进的控制函数
+        function toggleRunning() {
+            running = !running;
+            document.getElementById('startBtn').textContent = running ? '暂停' : '开始';
+            if (running) {
+                setTimeout(animate, 50); // 延迟启动避免线程阻塞
+            }
+        }
+
+        function toggleMode() {
+            is3D = !is3D;
+            document.getElementById('modeDisplay').textContent = is3D ? '3D' : '2D';
+            createParameterInputs();
+        }
+
+        function reset() {
+            running = false;
+            document.getElementById('startBtn').textContent = '开始';
+            initializeExample();
+            createParameterInputs();
+            trail = [];
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // 初始化
+        initializeExample();
+        createParameterInputs();
+        draw();
+    </script>
+</body>
+</html>

@@ -1,0 +1,302 @@
+
+Copy Code
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: black;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        #canvas {
+            cursor: grab;
+        }
+        .controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .data-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 250px;
+        }
+        input[type="number"] {
+            width: 60px;
+        }
+        .color-picker {
+            vertical-align: middle;
+            height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="controls">
+        <button onclick="toggleSimulation()">开始/暂停</button>
+        <button onclick="resetSystem()">重置</button>
+        <button onclick="toggleFullscreen()">全屏</button>
+        <br>
+        <label>质点数量: 
+            <select id="bodyCount" onchange="updateBodyControls()">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+            </select>
+        </label>
+        <div id="bodyControls"></div>
+    </div>
+
+    <div class="data-panel" id="dataPanel"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let isRunning = false;
+let scale = 1;
+let offset = {x: 0, y: 0};
+let dragging = null;
+let selectedBody = null;
+
+class Body {
+    constructor(id) {
+        this.id = id;
+        this.mass = 100;
+        this.position = {x: 0, y: 0};
+        this.velocity = {x: 0, y: 0};
+        this.acceleration = {x: 0, y: 0};
+        this.color = `hsl(${id * 120}, 100%, 50%)`;
+        this.selected = false;
+    }
+}
+
+let bodies = [];
+
+// 初始化
+function init() {
+    resizeCanvas();
+    createBodyControls();
+    resetSystem();
+    requestAnimationFrame(update);
+}
+
+// 窗口尺寸变化
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
+// 创建质点控制界面
+function createBodyControls() {
+    const container = document.getElementById('bodyControls');
+    let html = '';
+    for (let i = 0; i < 3; i++) {
+        html += `
+            <div class="body-control" data-id="${i}" style="display: ${i < 1 ? 'block' : 'none'}">
+                质点 ${i+1}:
+                <input type="color" class="color-picker" onchange="updateBodyColor(${i}, this.value)">
+                质量: <input type="number" value="100" onchange="updateBodyMass(${i}, this.value)">
+            </div>
+        `;
+    }
+    container.innerHTML = html;
+}
+
+// 事件监听
+canvas.addEventListener('wheel', handleZoom);
+canvas.addEventListener('mousedown', startDrag);
+canvas.addEventListener('mousemove', handleDrag);
+canvas.addEventListener('mouseup', endDrag);
+canvas.addEventListener('contextmenu', handleRightClick);
+window.addEventListener('resize', resizeCanvas);
+
+// 物理计算
+function calculatePhysics() {
+    const G = 6.67430e-11; // 引力常数
+    
+    bodies.forEach(body => {
+        body.acceleration = {x: 0, y: 0};
+        bodies.forEach(other => {
+            if (body === other) return;
+            
+            const dx = other.position.x - body.position.x;
+            const dy = other.position.y - body.position.y;
+            const r = Math.sqrt(dx*dx + dy*dy) || 1e-6;
+            const F = G * other.mass / (r*r);
+            
+            body.acceleration.x += F * dx / r;
+            body.acceleration.y += F * dy / r;
+        });
+    });
+}
+
+// 更新系统状态
+function update() {
+    if (isRunning) {
+        calculatePhysics();
+        bodies.forEach(body => {
+            body.velocity.x += body.acceleration.x;
+            body.velocity.y += body.acceleration.y;
+            body.position.x += body.velocity.x;
+            body.position.y += body.velocity.y;
+        });
+    }
+
+    draw();
+    updateDataPanel();
+    requestAnimationFrame(update);
+}
+
+// 绘制函数
+function draw() {
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(offset.x, offset.y);
+    ctx.scale(scale, scale);
+
+    bodies.forEach(body => {
+        ctx.beginPath();
+        ctx.arc(body.position.x, body.position.y, Math.sqrt(body.mass)/2, 0, Math.PI*2);
+        ctx.fillStyle = body.selected ? '#fff' : body.color;
+        ctx.fill();
+    });
+
+    ctx.restore();
+}
+
+// 鼠标事件处理
+function handleZoom(e) {
+    e.preventDefault();
+    const zoomIntensity = 0.1;
+    const oldScale = scale;
+    
+    scale *= 1 + (e.deltaY > 0 ? -zoomIntensity : zoomIntensity);
+    scale = Math.min(Math.max(1, scale), 100);
+    
+    const mouseX = (e.clientX - offset.x) / oldScale;
+    const mouseY = (e.clientY - offset.y) / oldScale;
+    
+    offset.x = e.clientX - mouseX * scale;
+    offset.y = e.clientY - mouseY * scale;
+}
+
+function startDrag(e) {
+    if (e.button === 2) { // 右键拖拽视图
+        dragging = {x: e.clientX, y: e.clientY};
+        canvas.style.cursor = 'grabbing';
+    } else { // 左键选择质点
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = (e.clientX - offset.x - rect.left) / scale;
+        const mouseY = (e.clientY - offset.y - rect.top) / scale;
+        
+        selectedBody = bodies.find(body => 
+            Math.hypot(body.position.x - mouseX, body.position.y - mouseY) < Math.sqrt(body.mass)
+        );
+        
+        if (selectedBody) {
+            selectedBody.selected = true;
+            selectedBody.velocity = {x: 0, y: 0};
+        }
+    }
+}
+
+function handleDrag(e) {
+    if (dragging) {
+        offset.x += e.clientX - dragging.x;
+        offset.y += e.clientY - dragging.y;
+        dragging = {x: e.clientX, y: e.clientY};
+    }
+    
+    if (selectedBody) {
+        const rect = canvas.getBoundingClientRect();
+        selectedBody.position.x = (e.clientX - offset.x - rect.left) / scale;
+        selectedBody.position.y = (e.clientY - offset.y - rect.top) / scale;
+    }
+}
+
+function endDrag() {
+    dragging = null;
+    if (selectedBody) {
+        selectedBody.selected = false;
+        selectedBody = null;
+    }
+    canvas.style.cursor = 'grab';
+}
+
+function handleRightClick(e) {
+    e.preventDefault();
+}
+
+// 控制功能
+function toggleSimulation() {
+    isRunning = !isRunning;
+}
+
+function resetSystem() {
+    bodies = [];
+    const count = parseInt(document.getElementById('bodyCount').value);
+    for (let i = 0; i < count; i++) {
+        const body = new Body(i);
+        body.position = {
+            x: canvas.width/(2*scale) + (i-1)*50,
+            y: canvas.height/(2*scale)
+        };
+        bodies.push(body);
+    }
+}
+
+function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+        canvas.requestFullscreen();
+    } else {
+        document.exitFullscreen();
+    }
+}
+
+function updateBodyControls() {
+    document.querySelectorAll('.body-control').forEach((el, i) => {
+        el.style.display = i < document.getElementById('bodyCount').value ? 'block' : 'none';
+    });
+    resetSystem();
+}
+
+function updateBodyColor(id, color) {
+    bodies[id].color = color;
+}
+
+function updateBodyMass(id, mass) {
+    bodies[id].mass = parseFloat(mass);
+}
+
+function updateDataPanel() {
+    const panel = document.getElementById('dataPanel');
+    panel.innerHTML = bodies.map(body => `
+        <div>
+            <h3 style="color:${body.color}">质点 ${body.id+1}</h3>
+            <p>质量: ${body.mass.toFixed(1)} kg</p>
+            <p>位置: (${body.position.x.toFixed(2)}, ${body.position.y.toFixed(2)}) m</p>
+            <p>速度: (${body.velocity.x.toFixed(2)}, ${body.velocity.y.toFixed(2)}) m/s</p>
+            <p>加速度: (${body.acceleration.x.toExponential(2)}, ${body.acceleration.y.toExponential(2)}) m/s²</p>
+        </div>
+    `).join('');
+}
+
+// 启动程序
+init();
+</script>
+</body>
+</html>

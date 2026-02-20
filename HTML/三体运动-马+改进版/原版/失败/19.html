@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        .container {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+        }
+        canvas {
+            border: 1px solid #333;
+            background: #000;
+        }
+        .controls {
+            width: 300px;
+            color: white;
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .particle-control {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #666;
+            border-radius: 5px;
+        }
+        label {
+            display: block;
+            margin: 8px 0;
+            font-size: 14px;
+        }
+        #dataPanel {
+            margin-top: 20px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="canvas" width="800" height="600"></canvas>
+        <div class="controls">
+            <div class="particle-control">
+                <h3>质点1控制</h3>
+                <label>颜色: <input type="color" id="color1" value="#ff0000"></label>
+                <label>X: <input type="range" id="x1" min="0" max="800" value="400"> <span>400</span></label>
+                <label>Y: <input type="range" id="y1" min="0" max="600" value="300"> <span>300</span></label>
+                <label>质量: <input type="range" id="mass1" min="1" max="100" value="50"> <span>50</span></label>
+                <label>速度: <input type="range" id="speed1" min="0" max="100" value="0"> <span>0</span></label>
+                <label>角度: <input type="range" id="angle1" min="0" max="360" value="90"> <span>90°</span></label>
+            </div>
+            <!-- 重复类似结构用于质点2和3 -->
+            <button id="resetBtn" style="margin-top: 15px;">重置/开始</button>
+            <div id="dataPanel"></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let isAnimating = false;
+        const G = 0.5; // 引力常数
+
+        class Particle {
+            constructor(x, y, vx, vy, mass, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.ax = 0;
+                this.ay = 0;
+                this.mass = mass;
+                this.color = color;
+                this.radius = Math.sqrt(mass);
+                this.trail = [];
+            }
+        }
+
+        function initParticles() {
+            particles = [];
+            for (let i = 1; i <= 3; i++) {
+                const color = document.getElementById(`color${i}`).value;
+                const x = parseInt(document.getElementById(`x${i}`).value);
+                const y = parseInt(document.getElementById(`y${i}`).value);
+                const mass = parseInt(document.getElementById(`mass${i}`).value);
+                const speed = parseInt(document.getElementById(`speed${i}`).value);
+                const angle = parseInt(document.getElementById(`angle${i}`).value) * Math.PI / 180;
+                
+                particles.push(new Particle(
+                    x, y,
+                    speed * Math.cos(angle),
+                    speed * Math.sin(angle),
+                    mass,
+                    color
+                ));
+            }
+        }
+
+        function computeForces() {
+            const softening = 5; // 防止除以零
+            particles.forEach(p => { p.ax = p.ay = 0; });
+
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const p1 = particles[i];
+                    const p2 = particles[j];
+                    
+                    const dx = p2.x - p1.x;
+                    const dy = p2.y - p1.y;
+                    const r = Math.sqrt(dx*dx + dy*dy + softening*softening);
+                    const F = G * p1.mass * p2.mass / (r*r);
+
+                    p1.ax += F * dx / (r * p1.mass);
+                    p1.ay += F * dy / (r * p1.mass);
+                    p2.ax -= F * dx / (r * p2.mass);
+                    p2.ay -= F * dy / (r * p2.mass);
+                }
+            }
+        }
+
+        function updateParticles(dt) {
+            particles.forEach(p => {
+                p.vx += p.ax * dt;
+                p.vy += p.ay * dt;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                
+                // 记录轨迹
+                p.trail.push({x: p.x, y: p.y});
+                if (p.trail.length > 50) p.trail.shift();
+            });
+        }
+
+        function draw() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            particles.forEach(p => {
+                // 绘制轨迹
+                ctx.beginPath();
+                p.trail.forEach((pos, i) => {
+                    ctx.fillStyle = `${p.color}${Math.round(i/50*30).toString(16)}`;
+                    ctx.fillRect(pos.x, pos.y, 2, 2);
+                });
+
+                // 绘制质点
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
+                ctx.fillStyle = p.color;
+                ctx.fill();
+            });
+        }
+
+        function updateDataPanel() {
+            let html = '';
+            particles.forEach((p, i) => {
+                html += `<div><strong>质点 ${i+1}:</strong> 
+                        X: ${p.x.toFixed(1)}, Y: ${p.y.toFixed(1)}<br>
+                        速度: ${Math.hypot(p.vx, p.vy).toFixed(1)} px/s</div>`;
+            });
+            document.getElementById('dataPanel').innerHTML = html;
+        }
+
+        function animate(timestamp) {
+            computeForces();
+            updateParticles(0.016); // 固定时间步长
+            draw();
+            updateDataPanel();
+            if (isAnimating) requestAnimationFrame(animate);
+        }
+
+        // 初始化事件监听
+        document.querySelectorAll('input[type="range"]').forEach(input => {
+            input.addEventListener('input', function() {
+                this.nextElementSibling.textContent = this.id.includes('angle') ? 
+                    `${this.value}°` : this.value;
+            });
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            if (!isAnimating) {
+                isAnimating = true;
+                animate();
+            }
+            initParticles();
+        });
+
+        // 初始化
+        initParticles();
+    </script>
+</body>
+</html>

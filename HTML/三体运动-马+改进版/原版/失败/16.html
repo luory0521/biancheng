@@ -1,0 +1,210 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        canvas { background: #000; }
+        .controls {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.8);
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .data-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.8);
+            padding: 15px;
+            border-radius: 5px;
+            max-width: 300px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="controls">
+        <div>
+            <button onclick="toggleSimulation()">▶/⏸</button>
+            <button onclick="clearBodies()">清除</button>
+            <button onclick="addBody()">+ 质点</button>
+        </div>
+        <div id="body-controls"></div>
+    </div>
+
+    <div class="data-panel" id="data-panel"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let bodies = [];
+let selectedBody = null;
+let isSimulating = false;
+let dragStartPos = { x: 0, y: 0 };
+let dragStartTime = 0;
+
+// 初始化画布尺寸
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+class Body {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.mass = 100;
+        this.color = `hsl(${Math.random()*360}, 100%, 50%)`;
+        this.trail = [];
+    }
+}
+
+function addBody() {
+    bodies.push(new Body(canvas.width/2, canvas.height/2));
+    updateBodyControls();
+}
+
+function clearBodies() {
+    bodies = [];
+    updateBodyControls();
+}
+
+function updateBodyControls() {
+    const container = document.getElementById('body-controls');
+    container.innerHTML = bodies.map((body, i) => `
+        <div>
+            <h4>质点 ${i+1}</h4>
+            <input type="color" value="${body.color}" 
+                   onchange="bodies[${i}].color = this.value">
+            <input type="number" value="${body.mass}" 
+                   onchange="bodies[${i}].mass = parseFloat(this.value)">
+        </div>
+    `).join('');
+}
+
+function toggleSimulation() {
+    isSimulating = !isSimulating;
+    if (isSimulating) requestAnimationFrame(update);
+}
+
+function calculateAcceleration(body) {
+    let ax = 0, ay = 0;
+    bodies.forEach(other => {
+        if (body === other) return;
+        const dx = other.x - body.x;
+        const dy = other.y - body.y;
+        const distSq = dx*dx + dy*dy;
+        const dist = Math.sqrt(distSq);
+        const force = 1000 * other.mass / (distSq + 100);
+        ax += force * dx / dist;
+        ay += force * dy / dist;
+    });
+    return { ax: ax / body.mass, ay: ay / body.mass };
+}
+
+function update(timestamp) {
+    if (!isSimulating) return;
+    
+    bodies.forEach(body => {
+        const { ax, ay } = calculateAcceleration(body);
+        body.vx += ax * 0.016;
+        body.vy += ay * 0.016;
+        body.x += body.vx;
+        body.y += body.vy;
+        
+        // 记录轨迹
+        body.trail.push({x: body.x, y: body.y});
+        if (body.trail.length > 50) body.trail.shift();
+    });
+    
+    draw();
+    requestAnimationFrame(update);
+}
+
+function draw() {
+    ctx.fillStyle = 'rgba(0,0,0,0.1)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    bodies.forEach(body => {
+        // 绘制轨迹
+        ctx.beginPath();
+        body.trail.forEach((pos, i) => {
+            ctx.fillStyle = `${body.color}${Math.round(i/50*20).toString(16)}`;
+            ctx.fillRect(pos.x, pos.y, 2, 2);
+        });
+        
+        // 绘制质点
+        ctx.fillStyle = body.color;
+        ctx.beginPath();
+        ctx.arc(body.x, body.y, Math.sqrt(body.mass)/2, 0, Math.PI*2);
+        ctx.fill();
+    });
+    
+    updateDataPanel();
+}
+
+function updateDataPanel() {
+    document.getElementById('data-panel').innerHTML = bodies.map((body, i) => `
+        <h3>质点 ${i+1}</h3>
+        位置: (${body.x.toFixed(1)}, ${body.y.toFixed(1)})<br>
+        速度: (${body.vx.toFixed(1)}, ${body.vy.toFixed(1)})<br>
+        质量: ${body.mass.toFixed(1)}
+    `).join('');
+}
+
+// 鼠标交互
+canvas.addEventListener('mousedown', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    
+    bodies.forEach(body => {
+        const dx = body.x - mx;
+        const dy = body.y - my;
+        if (dx*dx + dy*dy < body.mass*10) {
+            selectedBody = body;
+            dragStartPos = { x: mx, y: my };
+            dragStartTime = Date.now();
+        }
+    });
+});
+
+canvas.addEventListener('mousemove', e => {
+    if (!selectedBody) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    
+    selectedBody.x = mx;
+    selectedBody.y = my;
+    draw();
+});
+
+canvas.addEventListener('mouseup', e => {
+    if (!selectedBody) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    
+    const dt = Date.now() - dragStartTime;
+    selectedBody.vx = (mx - dragStartPos.x) / dt * 1000;
+    selectedBody.vy = (my - dragStartPos.y) / dt * 1000;
+    selectedBody = null;
+});
+
+// 初始化
+addBody();
+updateBodyControls();
+draw();
+</script>
+</body>
+</html>

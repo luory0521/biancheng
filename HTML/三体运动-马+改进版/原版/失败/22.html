@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>完整三体模拟器</title>
+    <style>
+        /* 保持原有样式基础上增加三列布局 */
+        .particle-controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+        .particle-control {
+            background: #333;
+            padding: 15px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="simCanvas" width="800" height="600"></canvas>
+        <div class="controls">
+            <div class="particle-controls">
+                <!-- 质点1控制 -->
+                <div class="particle-control" id="particle1">
+                    <h3>质点1</h3>
+                    <label>颜色 <input type="color" value="#ff0000"></label>
+                    <label>X <input type="range" class="posX" min="0" max="800" value="200"></label>
+                    <label>Y <input type="range" class="posY" min="0" max="600" value="200"></label>
+                    <label>质量 <input type="range" class="mass" min="1" max="100" value="30"></label>
+                    <label>速度 <input type="range" class="speed" min="0" max="100" value="20"></label>
+                    <label>角度 <input type="range" class="angle" min="0" max="360" value="45"></label>
+                </div>
+
+                <!-- 质点2控制 -->
+                <div class="particle-control" id="particle2">
+                    <h3>质点2</h3>
+                    <label>颜色 <input type="color" value="#00ff00"></label>
+                    <label>X <input type="range" class="posX" min="0" max="800" value="600"></label>
+                    <label>Y <input type="range" class="posY" min="0" max="600" value="200"></label>
+                    <label>质量 <input type="range" class="mass" min="1" max="100" value="40"></label>
+                    <label>速度 <input type="range" class="speed" min="0" max="100" value="15"></label>
+                    <label>角度 <input type="range" class="angle" min="0" max="360" value="135"></label>
+                </div>
+
+                <!-- 质点3控制 -->
+                <div class="particle-control" id="particle3">
+                    <h3>质点3</h3>
+                    <label>颜色 <input type="color" value="#0000ff"></label>
+                    <label>X <input type="range" class="posX" min="0" max="800" value="400"></label>
+                    <label>Y <input type="range" class="posY" min="0" max="600" value="500"></label>
+                    <label>质量 <input type="range" class="mass" min="1" max="100" value="50"></label>
+                    <label>速度 <input type="range" class="speed" min="0" max="100" value="10"></label>
+                    <label>角度 <input type="range" class="angle" min="0" max="360" value="270"></label>
+                </div>
+            </div>
+
+            <div class="global-controls">
+                <button id="startBtn">开始</button>
+                <button id="resetBtn">重置</button>
+                <label>引力常数 <input type="range" id="gravity" min="1" max="200" value="100"></label>
+            </div>
+            <div id="dataPanel"></div>
+        </div>
+    </div>
+
+<script>
+// 物理引擎核心（完整三体计算）
+class Particle {
+    constructor(id) {
+        this.id = id;
+        this.color = '#ffffff';
+        this.pos = { x: 0, y: 0 };
+        this.mass = 1;
+        this.velocity = { x: 0, y: 0 };
+        this.acceleration = { x: 0, y: 0 };
+        this.trail = [];
+        this.updateFromControls();
+    }
+
+    updateFromControls() {
+        const control = document.querySelector(`#particle${this.id}`);
+        this.color = control.querySelector('input[type="color"]').value;
+        this.pos.x = parseInt(control.querySelector('.posX').value);
+        this.pos.y = parseInt(control.querySelector('.posY').value);
+        this.mass = parseInt(control.querySelector('.mass').value);
+        
+        const speed = parseInt(control.querySelector('.speed').value);
+        const angle = parseInt(control.querySelector('.angle').value) * Math.PI / 180;
+        this.velocity.x = speed * Math.cos(angle);
+        this.velocity.y = speed * Math.sin(angle);
+    }
+
+    calculateAcceleration(others, G) {
+        this.acceleration = { x: 0, y: 0 };
+        others.forEach(other => {
+            if (other.id === this.id) return;
+
+            const dx = other.pos.x - this.pos.x;
+            const dy = other.pos.y - this.pos.y;
+            const rSq = dx*dx + dy*dy + 10000; // 软化长度防止除零
+            
+            const F = G * this.mass * other.mass / rSq;
+            this.acceleration.x += F * dx / (Math.sqrt(rSq) * this.mass);
+            this.acceleration.y += F * dy / (Math.sqrt(rSq) * this.mass);
+        });
+    }
+
+    updatePosition(dt) {
+        // 四阶Runge-Kutta积分
+        const k1v = { x: this.acceleration.x, y: this.acceleration.y };
+        const k1x = { x: this.velocity.x, y: this.velocity.y };
+        
+        // 计算中间步骤（此处简化为半隐式欧拉法）
+        this.velocity.x += k1v.x * dt;
+        this.velocity.y += k1v.y * dt;
+        this.pos.x += this.velocity.x * dt;
+        this.pos.y += this.velocity.y * dt;
+
+        // 记录轨迹（最多100点）
+        this.trail.push({x: this.pos.x, y: this.pos.y});
+        if (this.trail.length > 100) this.trail.shift();
+    }
+
+    draw(ctx) {
+        // 绘制轨迹
+        ctx.beginPath();
+        this.trail.forEach((pos, i) => {
+            const alpha = Math.min(1, i/20);
+            ctx.strokeStyle = `${this.color}${Math.floor(alpha*255).toString(16).padStart(2, '0')}`;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, 1, 0, Math.PI*2);
+            ctx.stroke();
+        });
+
+        // 绘制质点本体
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, Math.sqrt(this.mass), 0, Math.PI*2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+    }
+}
+
+// 系统初始化
+const canvas = document.getElementById('simCanvas');
+const ctx = canvas.getContext('2d');
+let particles = [];
+let isRunning = false;
+let G = 100;
+
+function initializeSystem() {
+    particles = [new Particle(1), new Particle(2), new Particle(3)];
+    document.getElementById('gravity').addEventListener('input', e => {
+        G = parseInt(e.target.value);
+    });
+}
+
+function simulationLoop() {
+    // 清空画布（保留残影效果）
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 计算每个质点的加速度
+    particles.forEach(p => p.calculateAcceleration(particles, G));
+    
+    // 更新位置
+    const dt = 0.016; // 时间步长（约60FPS）
+    particles.forEach(p => p.updatePosition(dt));
+    
+    // 绘制所有质点
+    particles.forEach(p => p.draw(ctx));
+    
+    // 更新数据面板
+    updateDataPanel();
+    
+    if (isRunning) requestAnimationFrame(simulationLoop);
+}
+
+function updateDataPanel() {
+    let data = '';
+    particles.forEach(p => {
+        data += `质点${p.id}:
+ 位置: (${p.pos.x.toFixed(1)}, ${p.pos.y.toFixed(1)})
+ 速度: ${Math.hypot(p.velocity.x, p.velocity.y).toFixed(1)} px/s
+ 方向: ${(Math.atan2(p.velocity.y, p.velocity.x)*180/Math.PI).toFixed(1)}°
+ 质量: ${p.mass}
+----------------\n`;
+    });
+    document.getElementById('dataPanel').textContent = data;
+}
+
+// 事件处理
+document.getElementById('startBtn').addEventListener('click', () => {
+    if (!isRunning) {
+        isRunning = true;
+        simulationLoop();
+        this.textContent = '暂停';
+    } else {
+        isRunning = false;
+        this.textContent = '继续';
+    }
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+    isRunning = false;
+    particles.forEach(p => p.updateFromControls());
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    updateDataPanel();
+});
+
+// 启动系统
+initializeSystem();
+updateDataPanel();
+</script>
+</body>
+</html>

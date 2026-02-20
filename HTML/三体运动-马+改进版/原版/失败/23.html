@@ -1,0 +1,110 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        body { display: flex; gap: 20px; padding: 20px }
+        .controls { width: 300px; display: flex; flex-direction: column; gap: 10px }
+        .planet-config { border: 1px solid #ccc; padding: 10px; margin-bottom: 10px }
+        canvas { border: 1px solid #000 }
+        .data-panel { margin-top: 20px; font-family: monospace }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <div class="planet-config" id="planet1">
+            <h3>质点1</h3>
+            <label>颜色: <input type="color" value="#ff0000"></label>
+            <label>X: <input type="number" value="300" step="10"></label>
+            <label>Y: <input type="number" value="200" step="10"></label>
+            <label>质量: <input type="number" value="100" step="10"></label>
+            <label>Vx: <input type="number" value="0" step="0.1"></label>
+            <label>Vy: <input type="number" value="2" step="0.1"></label>
+        </div>
+        <!-- 其他两个质点的配置结构相同 -->
+    </div>
+
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const G = 100;
+    const dt = 0.01;
+    let canvas = document.getElementById('canvas');
+    let ctx = canvas.getContext('2d');
+    let isRunning = false;
+    let planets = [];
+
+    class Planet {
+        constructor(configElement) {
+            this.configElement = configElement;
+            this.updateFromUI();
+            this.ax = 0;
+            this.ay = 0;
+        }
+
+        updateFromUI() {
+            const inputs = this.configElement.querySelectorAll('input');
+            this.color = inputs.value;
+            this.x = parseFloat(inputs.value);
+            this.y = parseFloat(inputs.value);
+            this.mass = parseFloat(inputs.value);
+            this.vx = parseFloat(inputs.value);
+            this.vy = parseFloat(inputs.value);
+        }
+
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, Math.sqrt(this.mass)/2, 0, Math.PI*2);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+        }
+    }
+
+    function init() {
+        // 清除旧质点
+        planets = [];
+        
+        // 创建新质点
+        const configElements = document.querySelectorAll('.planet-config');
+        configElements.forEach(element => {
+            planets.push(new Planet(element));
+        });
+
+        // 绑定UI事件
+        document.querySelectorAll('.planet-config input').forEach(input => {
+            input.addEventListener('input', () => {
+                planets.forEach(p => p.updateFromUI());
+                if(!isRunning) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    planets.forEach(p => p.draw());
+                    updateDataPanel();
+                }
+            });
+        });
+
+        // 初始绘制
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        planets.forEach(p => p.draw());
+        updateDataPanel();
+    }
+
+    // 其他物理计算和动画函数保持不变
+    // ...
+
+    // 事件监听
+    document.getElementById('startBtn').addEventListener('click', () => {
+        isRunning = !isRunning;
+        document.getElementById('startBtn').textContent = isRunning ? '暂停' : '开始';
+        if(isRunning) animate();
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', init);
+
+    // 初始化
+    init();
+});
+</script>
+</body>
+</html>

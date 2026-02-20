@@ -1,0 +1,267 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        canvas {
+            border: 1px solid #000;
+            float: left;
+        }
+        .controls {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            overflow: hidden;
+        }
+        .param-group {
+            margin: 5px 0;
+            padding: 5px;
+            border: 1px solid #ddd;
+        }
+        .body-params {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #666;
+        }
+        .data-panel {
+            float: left;
+            margin-left: 20px;
+            padding: 10px;
+            border: 1px solid #999;
+            background: #333;
+            color: white;
+        }
+        .data-body {
+            margin: 10px 0;
+            padding: 5px;
+            border: 1px solid #444;
+        }
+        .data-body h4 {
+            margin: 0 0 5px 0;
+            color: #88f;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <!-- 原有控件保持不变，新增颜色选择器 -->
+        <button onclick="toggleSimulation()">开始/暂停</button>
+        <button onclick="reset()">重置</button>
+        
+        <div class="param-group">
+            维度: 
+            <select id="dimension" onchange="reset()">
+                <option value="2">2D</option>
+                <option value="3">3D</option>
+            </select>
+            
+            质点数量: 
+            <select id="bodyCount" onchange="reset()">
+                <option value="1">1</option>
+                <option value="3">3</option>
+            </select>
+        </div>
+
+        <div class="param-group">
+            引力常数: <input type="number" id="G" value="100" step="10">
+            时间步长: <input type="number" id="dt" value="0.01" step="0.01">
+        </div>
+
+        <!-- 修改后的质点参数面板 -->
+        <div class="body-params" id="body1">
+            <h4>质点 1</h4>
+            颜色: <input type="color" class="color" value="#ff0000">
+            质量: <input type="number" class="mass" value="100" step="10">
+            速度X: <input type="number" class="velX" value="0" step="0.1">
+            速度Y: <input type="number" class="velY" value="0" step="0.1">
+            <span class="velZContainer">
+                速度Z: <input type="number" class="velZ" value="0" step="0.1">
+            </span>
+        </div>
+        <div class="body-params" id="body2" style="display: none;">
+            <h4>质点 2</h4>
+            颜色: <input type="color" class="color" value="#00ff00">
+            质量: <input type="number" class="mass" value="100" step="10">
+            速度X: <input type="number" class="velX" value="0" step="0.1">
+            速度Y: <input type="number" class="velY" value="0" step="0.1">
+            <span class="velZContainer">
+                速度Z: <input type="number" class="velZ" value="0" step="0.1">
+            </span>
+        </div>
+        <div class="body-params" id="body3" style="display: none;">
+            <h4>质点 3</h4>
+            颜色: <input type="color" class="color" value="#0000ff">
+            质量: <input type="number" class="mass" value="100" step="10">
+            速度X: <input type="number" class="velX" value="0" step="0.1">
+            速度Y: <input type="number" class="velY" value="0" step="0.1">
+            <span class="velZContainer">
+                速度Z: <input type="number" class="velZ" value="0" step="0.1">
+            </span>
+        </div>
+    </div>
+
+    <canvas id="canvas" width="800" height="600"></canvas>
+    <div class="data-panel" id="dataPanel"></div>
+
+    <script>
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let isRunning = false;
+        let bodies = [];
+
+        class Body {
+            constructor(mass, position, velocity, color) {
+                this.mass = mass;
+                this.position = position;
+                this.velocity = velocity;
+                this.color = color;
+                this.trail = [];
+            }
+        }
+
+        function toggleSimulation() {
+            isRunning = !isRunning;
+            if (isRunning) requestAnimationFrame(update);
+        }
+
+        function createDataPanel() {
+            const panel = document.getElementById('dataPanel');
+            panel.innerHTML = '';
+            
+            bodies.forEach((body, index) => {
+                const dimension = parseInt(document.getElementById('dimension').value);
+                const html = `
+                    <div class="data-body" data-index="${index}">
+                        <h4 style="color: ${body.color}">质点 ${index + 1}</h4>
+                        <div>质量: ${body.mass.toFixed(1)}</div>
+                        <div>位置X: <span class="posX">0</span></div>
+                        <div>位置Y: <span class="posY">0</span></div>
+                        ${dimension === 3 ? '<div>位置Z: <span class="posZ">0</span></div>' : ''}
+                        <div>速度X: <span class="velX">0</span></div>
+                        <div>速度Y: <span class="velY">0</span></div>
+                        ${dimension === 3 ? '<div>速度Z: <span class="velZ">0</span></div>' : ''}
+                    </div>
+                `;
+                panel.innerHTML += html;
+            });
+        }
+
+        function updateDataPanel() {
+            const dimension = parseInt(document.getElementById('dimension').value);
+            document.querySelectorAll('.data-body').forEach((panel, index) => {
+                const body = bodies[index];
+                panel.querySelector('.posX').textContent = body.position.x.toFixed(2);
+                panel.querySelector('.posY').textContent = body.position.y.toFixed(2);
+                panel.querySelector('.velX').textContent = body.velocity.x.toFixed(2);
+                panel.querySelector('.velY').textContent = body.velocity.y.toFixed(2);
+                
+                if (dimension === 3) {
+                    panel.querySelector('.posZ').textContent = body.position.z.toFixed(2);
+                    panel.querySelector('.velZ').textContent = body.velocity.z.toFixed(2);
+                }
+            });
+        }
+
+        function reset() {
+            const bodyCount = parseInt(document.getElementById('bodyCount').value);
+            const dimension = parseInt(document.getElementById('dimension').value);
+
+            // 更新参数面板显示
+            for (let i = 1; i <= 3; i++) {
+                const panel = document.getElementById(`body${i}`);
+                panel.style.display = i <= bodyCount ? 'block' : 'none';
+                panel.querySelector('.velZContainer').style.display = dimension === 3 ? 'inline' : 'none';
+            }
+
+            // 创建新的天体
+            bodies = [];
+            for (let i = 1; i <= bodyCount; i++) {
+                const bodyEl = document.getElementById(`body${i}`);
+                bodies.push(new Body(
+                    parseFloat(bodyEl.querySelector('.mass').value),
+                    {
+                        x: Math.random() * canvas.width,
+                        y: Math.random() * canvas.height,
+                        z: dimension === 3 ? Math.random() * 300 - 150 : 0
+                    },
+                    {
+                        x: parseFloat(bodyEl.querySelector('.velX').value),
+                        y: parseFloat(bodyEl.querySelector('.velY').value),
+                        z: dimension === 3 ? parseFloat(bodyEl.querySelector('.velZ').value) : 0
+                    },
+                    bodyEl.querySelector('.color').value
+                ));
+            }
+
+            createDataPanel();
+        }
+
+        function update() {
+            if (!isRunning) return;
+
+            const G = parseFloat(document.getElementById('G').value);
+            const dt = parseFloat(document.getElementById('dt').value);
+            const dimension = parseInt(document.getElementById('dimension').value);
+
+            // 物理计算部分保持不变
+            for (let i = 0; i < bodies.length; i++) {
+                let totalForce = {x: 0, y: 0, z: 0};
+                
+                for (let j = 0; j < bodies.length; j++) {
+                    if (i === j) continue;
+                    
+                    let dx = bodies[j].position.x - bodies[i].position.x;
+                    let dy = bodies[j].position.y - bodies[i].position.y;
+                    let dz = bodies[j].position.z - bodies[i].position.z;
+                    let r = Math.sqrt(dx*dx + dy*dy + dz*dz + 1);
+
+                    let F = G * bodies[i].mass * bodies[j].mass / (r*r);
+                    
+                    totalForce.x += F * dx/r;
+                    totalForce.y += F * dy/r;
+                    if (dimension === 3) totalForce.z += F * dz/r;
+                }
+
+                bodies[i].velocity.x += totalForce.x / bodies[i].mass * dt;
+                bodies[i].velocity.y += totalForce.y / bodies[i].mass * dt;
+                if (dimension === 3) bodies[i].velocity.z += totalForce.z / bodies[i].mass * dt;
+            }
+
+            bodies.forEach(body => {
+                body.position.x += body.velocity.x * dt;
+                body.position.y += body.velocity.y * dt;
+                body.position.z += body.velocity.z * dt;
+                
+                body.trail.push({...body.position});
+                if (body.trail.length > 50) body.trail.shift();
+            });
+
+            draw();
+            updateDataPanel();
+            requestAnimationFrame(update);
+        }
+
+        function draw() {
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            bodies.forEach(body => {
+                ctx.strokeStyle = body.color;
+                ctx.beginPath();
+                body.trail.forEach(pos => ctx.lineTo(pos.x, pos.y));
+                ctx.stroke();
+
+                ctx.fillStyle = body.color;
+                const zScale = Math.max(0.5, 1 + body.position.z/300);
+                ctx.beginPath();
+                ctx.arc(body.position.x, body.position.y, 
+                       Math.sqrt(body.mass)*zScale, 0, Math.PI*2);
+                ctx.fill();
+            });
+        }
+
+        reset();
+    </script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        canvas {
+            border: 1px solid #000;
+        }
+        .controls {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+        .param-group {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <button onclick="toggleSimulation()">开始/暂停</button>
+        <button onclick="reset()">重置</button>
+        
+        <div class="param-group">
+            维度: 
+            <select id="dimension" onchange="reset()">
+                <option value="2">2D</option>
+                <option value="3">3D</option>
+            </select>
+            
+            质点数量: 
+            <select id="bodyCount" onchange="reset()">
+                <option value="1">1</option>
+                <option value="3">3</option>
+            </select>
+        </div>
+
+        <div class="param-group">
+            引力常数: <input type="number" id="G" value="100" step="10">
+            时间步长: <input type="number" id="dt" value="0.01" step="0.01">
+        </div>
+    </div>
+
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <script>
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let isRunning = false;
+        let bodies = [];
+
+        class Body {
+            constructor(mass, position, velocity, color) {
+                this.mass = mass;
+                this.position = position;
+                this.velocity = velocity;
+                this.color = color;
+                this.trail = [];
+            }
+        }
+
+        function toggleSimulation() {
+            isRunning = !isRunning;
+            if (isRunning) requestAnimationFrame(update);
+        }
+
+        function reset() {
+            bodies = [];
+            const dimension = parseInt(document.getElementById('dimension').value);
+            const bodyCount = parseInt(document.getElementById('bodyCount').value);
+
+            // 初始化天体
+            for (let i = 0; i < bodyCount; i++) {
+                bodies.push(new Body(
+                    Math.random() * 50 + 50,
+                    {
+                        x: Math.random() * canvas.width,
+                        y: Math.random() * canvas.height,
+                        z: dimension === 3 ? Math.random() * 300 - 150 : 0
+                    },
+                    {
+                        x: (Math.random() - 0.5) * 2,
+                        y: (Math.random() - 0.5) * 2,
+                        z: dimension === 3 ? (Math.random() - 0.5) * 2 : 0
+                    },
+                    `hsl(${Math.random() * 360}, 70%, 50%)`
+                ));
+            }
+        }
+
+        function update() {
+            if (!isRunning) return;
+
+            const G = parseFloat(document.getElementById('G').value);
+            const dt = parseFloat(document.getElementById('dt').value);
+            const dimension = parseInt(document.getElementById('dimension').value);
+
+            // 计算引力
+            for (let i = 0; i < bodies.length; i++) {
+                let totalForce = {x: 0, y: 0, z: 0};
+                
+                for (let j = 0; j < bodies.length; j++) {
+                    if (i === j) continue;
+                    
+                    let dx = bodies[j].position.x - bodies[i].position.x;
+                    let dy = bodies[j].position.y - bodies[i].position.y;
+                    let dz = bodies[j].position.z - bodies[i].position.z;
+                    let r = Math.sqrt(dx*dx + dy*dy + dz*dz + 1); // 避免除以零
+
+                    let F = G * bodies[i].mass * bodies[j].mass / (r*r);
+                    
+                    totalForce.x += F * dx/r;
+                    totalForce.y += F * dy/r;
+                    if (dimension === 3) totalForce.z += F * dz/r;
+                }
+
+                // 更新速度
+                bodies[i].velocity.x += totalForce.x / bodies[i].mass * dt;
+                bodies[i].velocity.y += totalForce.y / bodies[i].mass * dt;
+                if (dimension === 3) bodies[i].velocity.z += totalForce.z / bodies[i].mass * dt;
+            }
+
+            // 更新位置
+            bodies.forEach(body => {
+                body.position.x += body.velocity.x * dt;
+                body.position.y += body.velocity.y * dt;
+                body.position.z += body.velocity.z * dt;
+                
+                // 保留轨迹
+                body.trail.push({...body.position});
+                if (body.trail.length > 50) body.trail.shift();
+            });
+
+            draw();
+            requestAnimationFrame(update);
+        }
+
+        function draw() {
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            bodies.forEach(body => {
+                // 绘制轨迹
+                ctx.strokeStyle = body.color;
+                ctx.beginPath();
+                body.trail.forEach((pos, i) => {
+                    let alpha = i / body.trail.length;
+                    ctx.lineTo(pos.x, pos.y);
+                });
+                ctx.stroke();
+
+                // 绘制天体
+                ctx.fillStyle = body.color;
+                const zScale = Math.max(0.5, 1 + body.position.z/300);
+                ctx.beginPath();
+                ctx.arc(body.position.x, body.position.y, 
+                       Math.sqrt(body.mass)*zScale, 0, Math.PI*2);
+                ctx.fill();
+            });
+        }
+
+        reset();
+    </script>
+</body>
+</html>

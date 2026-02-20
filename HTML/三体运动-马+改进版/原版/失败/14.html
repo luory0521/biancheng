@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器 Pro</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: black;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        #canvas {
+            cursor: grab;
+            background: #000;
+        }
+        .controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 8px;
+            z-index: 1;
+        }
+        .data-panel {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 250px;
+            z-index: 1;
+        }
+        .control-group {
+            margin: 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #444;
+        }
+        .vector-control {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+        }
+        input[type="number"] {
+            width: 80px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border: 1px solid #666;
+        }
+        .body-control {
+            display: none;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #444;
+            border-radius: 5px;
+        }
+        .body-control.active {
+            display: block !important;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    
+    <div class="controls">
+        <button onclick="toggleSimulation()">开始/暂停</button>
+        <button onclick="resetSystem()">重置</button>
+        <button onclick="toggleFullscreen()">全屏</button>
+        
+        <div class="control-group">
+            引力常数(G): <input type="number" id="gravity" value="6.67e-11" step="1e-11">
+        </div>
+        
+        <div class="control-group">
+            质点数量: 
+            <select id="bodyCount" onchange="updateBodyControls()">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+            </select>
+        </div>
+        
+        <div id="bodyControls"></div>
+    </div>
+
+    <div class="data-panel" id="dataPanel"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let isRunning = false;
+let scale = 1e-9;
+let offset = {x: 0, y: 0};
+let dragging = null;
+let selectedBody = null;
+
+class Body {
+    constructor(id) {
+        this.id = id;
+        this.mass = 1e24;
+        this.position = {x: 0, y: 0};
+        this.velocity = {x: 0, y: 0};
+        this.acceleration = {x: 0, y: 0};
+        this.color = `hsl(${id * 120}, 100%, 50%)`;
+        this.selected = false;
+        this.dragMode = 'position';
+    }
+}
+
+let bodies = [];
+
+function init() {
+    resizeCanvas();
+    createBodyControls();
+    resetSystem();
+    requestAnimationFrame(update);
+}
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+
+function createBodyControls() {
+    const container = document.getElementById('bodyControls');
+    let html = '';
+    for (let i = 0; i < 3; i++) {
+        html += `
+            <div class="body-control" data-id="${i}">
+                <h4 style="color: hsl(${i * 120}, 100%, 50%)">质点 ${i+1}</h4>
+                
+                <div class="vector-control">
+                    <div>质量(kg): 
+                        <input type="number" value="1e24" 
+                               onchange="updateBodyProperty(${i}, 'mass', this.value)">
+                    </div>
+                    <div>颜色: 
+                        <input type="color" value="${hslToHex(i * 120, 100, 50)}" 
+                               onchange="updateBodyColor(${i}, this.value)">
+                    </div>
+                </div>
+
+                <div class="vector-control">
+                    <div>
+                        位置X(m): <input type="number" 
+                                   onchange="updateBodyProperty(${i}, 'position.x', this.value)">
+                    </div>
+                    <div>
+                        位置Y(m): <input type="number" 
+                                   onchange="updateBodyProperty(${i}, 'position.y', this.value)">
+                    </div>
+                </div>
+
+                <div class="vector-control">
+                    <div>
+                        速度X(m/s): <input type="number" value="0" 
+                                     onchange="updateBodyProperty(${i}, 'velocity.x', this.value)">
+                    </div>
+                    <div>
+                        速度Y(m/s): <input type="number" value="0" 
+                                     onchange="updateBodyProperty(${i}, 'velocity.y', this.value)">
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    container.innerHTML = html;
+}
+
+function updateBodyProperty(id, prop, value) {
+    const body = bodies[id];
+    const path = prop.split('.');
+    if (path.length === 1) {
+        body[prop] = parseFloat(value);
+    } else {
+        body[path][path] = parseFloat(value);
+    }
+}
+
+function hslToHex(h, s, l) {
+    l /= 100;
+    const a = s * Math.min(l, 1 - l) / 100;
+    const f = n => {
+        const k = (n + h/30) % 12;
+        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * color).toString(16).padStart(2, '0');
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+canvas.addEventListener('wheel', handleZoom);
+canvas.addEventListener('mousedown', startDrag);
+canvas.addEventListener('mousemove', handleDrag);
+canvas.addEventListener('mouseup', endDrag);
+canvas.addEventListener('contextmenu', handleRightClick);
+window.addEventListener('resize', resizeCanvas);
+
+function calculatePhysics() {
+    const G = parseFloat(document.getElementById('gravity').value);
+    
+    bodies.forEach(body => {
+        body.acceleration = {x: 0, y: 0};
+        bodies.forEach(other => {
+            if (body === other) return;
+            
+            const dx = other.position.x - body.position.x;
+            const dy = other.position.y - body.position.y;
+            const r = Math.max(1e6, Math.sqrt(dx*dx + dy*dy));
+            const F = G * other.mass / (r*r);
+            
+            body.acceleration.x += F * dx / r;
+            body.acceleration.y += F * dy / r;
+        });
+    });
+}
+
+function update() {
+    if (isRunning) {
+        calculatePhysics();
+        bodies.forEach(body => {
+            body.velocity.x += body.acceleration.x;
+            body.velocity.y += body.acceleration.y;
+            body.position.x += body.velocity.x;
+            body.position.y += body.velocity.y;
+        });
+    }
+
+    draw();
+    updateDataPanel();
+    requestAnimationFrame(update);
+}
+
+function draw() {
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(offset.x, offset.y);
+    ctx.scale(scale, scale);
+
+    bodies.forEach(body => {
+        const radius = Math.max(5, Math.sqrt(body.mass)/1e6);
+        
+        ctx.beginPath();
+        ctx.arc(body.position.x, body.position.y, radius, 0, Math.PI*2);
+        ctx.fillStyle = body.selected ? '#fff' : body.color;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(body.position.x, body.position.y);
+        ctx.lineTo(body.position.x + body.velocity.x * 1e5, 
+                  body.position.y + body.velocity.y * 1e5);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = radius/2;
+        ctx.stroke();
+    });
+
+    ctx.restore();
+}
+
+function handleZoom(e) {
+    e.preventDefault();
+    const zoomIntensity = 0.1;
+    const oldScale = scale;
+    
+    scale *= 1 + (e.deltaY > 0 ? -zoomIntensity : zoomIntensity);
+    scale = Math.min(Math.max(1e-12, scale), 1e-3);
+    
+    const mouseX = (e.clientX - offset.x - canvas.width/2) / oldScale;
+    const mouseY = (e.clientY - offset.y - canvas.height/2) / oldScale;
+    
+    offset.x = e.clientX - mouseX * scale - canvas.width/2;
+    offset.y = e.clientY - mouseY * scale - canvas.height/2;
+}
+
+function startDrag(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = (e.clientX - offset.x - rect.left) / scale;
+    const mouseY = (e.clientY - offset.y - rect.top) / scale;
+    
+    selectedBody = bodies.find(body => {
+        const radius = Math.max(5, Math.sqrt(body.mass)/1e6);
+        return Math.hypot(body.position.x - mouseX, body.position.y - mouseY) < radius;
+    });
+    
+    if (selectedBody) {
+        selectedBody.selected = true;
+        if (e.button === 0) {
+            selectedBody.dragMode = 'position';
+        } else if (e.button === 2) {
+            selectedBody.dragMode = 'velocity';
+            selectedBody.dragStart = {x: mouseX, y: mouseY};
+        }
+    } else {
+        dragging = {x: e.clientX, y: e.clientY};
+        canvas.style.cursor = 'grabbing';
+    }
+}
+
+function handleDrag(e) {
+    if (selectedBody) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = (e.clientX - offset.x - rect.left) / scale;
+        const mouseY = (e.clientY - offset.y - rect.top) / scale;
+        
+        if (selectedBody.dragMode === 'position') {
+            selectedBody.position.x = mouseX;
+            selectedBody.position.y = mouseY;
+            updateBodyControls(true);
+        } else if (selectedBody.dragMode === 'velocity') {
+            const dx = mouseX - selectedBody.dragStart.x;
+            const dy = mouseY - selectedBody.dragStart.y;
+            selectedBody.velocity.x = dx * 1e3;
+            selectedBody.velocity.y = dy * 1e3;
+        }
+    } else if (dragging) {
+        offset.x += e.clientX - dragging.x;
+        offset.y += e.clientY - dragging.y;
+        dragging = {x: e.clientX, y: e.clientY};
+    }
+}
+
+function endDrag() {
+    dragging = null;
+    if (selectedBody) {
+        selectedBody.selected = false;
+        selectedBody = null;
+    }
+    canvas.style.cursor = 'grab';
+}
+
+function handleRightClick(e) {
+    e.preventDefault();
+}
+
+function toggleSimulation() {
+    isRunning = !isRunning;
+}
+
+function resetSystem() {
+    bodies = [];
+    const count = parseInt(document.getElementById('bodyCount').value);
+    for (let i = 0; i < count; i++) {
+        const body = new Body(i);
+        body.position = {
+            x: (canvas.width/2 + (i-1)*200) / scale - offset.x,
+            y: (canvas.height/2) / scale - offset.y
+        };
+        bodies.push(body);
+    }
+    updateBodyControls(true);
+}
+
+function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+        canvas.requestFullscreen();
+    } else {
+        document.exitFullscreen();
+    }
+}
+
+function updateBodyControls(forceUpdate = false) {
+    const count = parseInt(document.getElementById('bodyCount').value);
+    document.querySelectorAll('.body-control').forEach((el, i) => {
+        el.classList.toggle('active', i < count);
+        if (forceUpdate && i < count) {
+            const inputs = el.querySelectorAll('input');
+            inputs.value = bodies[i].mass;
+            inputs.value = bodies[i].color;
+            inputs.value = bodies[i].position.x.toFixed(2);
+            inputs.value = bodies[i].position.y.toFixed(2);
+            inputs.value = bodies[i].velocity.x.toFixed(2);
+            inputs.value = bodies[i].velocity.y.toFixed(2);
+        }
+    });
+}
+
+function updateBodyColor(id, color) {
+    bodies[id].color = color;
+}
+
+function updateDataPanel() {
+    const panel = document.getElementById('dataPanel');
+    panel.innerHTML = bodies.map(body => `
+        <div>
+            <h3 style="color:${body.color}">质点 ${body.id+1}</h3>
+            <p>质量: ${body.mass.toExponential(2)} kg</p>
+            <p>位置: (${body.position.x.toExponential(2)}, ${body.position.y.toExponential(2)}) m</p>
+            <p>速度: (${body.velocity.x.toExponential(2)}, ${body.velocity.y.toExponential(2)}) m/s</p>
+            <p>加速度: (${body.acceleration.x.toExponential(2)}, ${body.acceleration.y.toExponential(2)}) m/s²</p>
+        </div>
+    `).join('');
+}
+
+init();
+</script>
+</body>
+</html>

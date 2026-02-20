@@ -1,0 +1,163 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体运动模拟器</title>
+    <style>
+        body { display: flex; margin: 0; padding: 20px; background: #1a1a1a; color: white; }
+        #canvas { border: 2px solid #444; background: black; }
+        .panel { margin-left: 20px; width: 300px; }
+        .control-group { margin-bottom: 15px; padding: 10px; border: 1px solid #444; }
+        input[type="number"] { width: 60px; margin: 5px; }
+        table { width: 100%; border-collapse: collapse; }
+        td, th { padding: 5px; border: 1px solid #444; text-align: left; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="800" height="600"></canvas>
+    
+    <div class="panel">
+        <div class="control-group">
+            <button onclick="toggleSimulation()">开始模拟</button>
+            <button onclick="reset()">重置</button>
+        </div>
+
+        <!-- 质点控制部分 -->
+        <div class="control-group">
+            <fieldset>
+                <legend>质点 1</legend>
+                颜色: <input type="color" value="#ff0000" id="c1"><br>
+                X: <input type="number" value="400" id="x1" step="10">
+                Y: <input type="number" value="300" id="y1" step="10"><br>
+                质量: <input type="number" value="100" id="m1"><br>
+                速度: <input type="number" value="0" id="vx1" step="0.1"> 
+                <input type="number" value="-1" id="vy1" step="0.1">
+            </fieldset>
+            <!-- 重复类似结构用于质点2和3 -->
+        </div>
+
+        <div class="control-group">
+            <h3>实时数据</h3>
+            <table id="dataPanel">
+                <!-- JavaScript动态填充数据 -->
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let isSimulating = false;
+        let bodies = [];
+        const G = 0.1; // 引力常数
+
+        class Body {
+            constructor(x, y, mass, vx, vy, color) {
+                this.x = x;
+                this.y = y;
+                this.mass = mass;
+                this.vx = vx;
+                this.vy = vy;
+                this.color = color;
+                this.ax = 0;
+                this.ay = 0;
+            }
+        }
+
+        function calculateForces() {
+            for (let body of bodies) {
+                body.ax = 0;
+                body.ay = 0;
+                
+                for (let other of bodies) {
+                    if (body === other) continue;
+                    const dx = other.x - body.x;
+                    const dy = other.y - body.y;
+                    const r = Math.sqrt(dx*dx + dy*dy);
+                    const F = G * body.mass * other.mass / (r*r);
+                    
+                    body.ax += F * dx / (r * body.mass);
+                    body.ay += F * dy / (r * body.mass);
+                }
+            }
+        }
+
+        function updatePositions() {
+            for (let body of bodies) {
+                body.vx += body.ax;
+                body.vy += body.ay;
+                body.x += body.vx;
+                body.y += body.vy;
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            for (let body of bodies) {
+                ctx.beginPath();
+                ctx.arc(body.x, body.y, Math.sqrt(body.mass)/2, 0, Math.PI*2);
+                ctx.fillStyle = body.color;
+                ctx.fill();
+            }
+            
+            updateDataPanel();
+        }
+
+        function simulationLoop() {
+            if (!isSimulating) return;
+            
+            calculateForces();
+            updatePositions();
+            draw();
+            requestAnimationFrame(simulationLoop);
+        }
+
+        function toggleSimulation() {
+            isSimulating = !isSimulating;
+            if (isSimulating) {
+                initializeBodies();
+                simulationLoop();
+            }
+        }
+
+        function initializeBodies() {
+            bodies = [];
+            // 从输入控件读取参数并创建质点
+            for (let i = 1; i <= 3; i++) {
+                if (document.getElementById(`x${i}`).value) {
+                    bodies.push(new Body(
+                        parseFloat(document.getElementById(`x${i}`).value),
+                        parseFloat(document.getElementById(`y${i}`).value),
+                        parseFloat(document.getElementById(`m${i}`).value),
+                        parseFloat(document.getElementById(`vx${i}`).value),
+                        parseFloat(document.getElementById(`vy${i}`).value),
+                        document.getElementById(`c${i}`).value
+                    ));
+                }
+            }
+        }
+
+        function updateDataPanel() {
+            let html = '<tr><th>质点</th><th>X</th><th>Y</th><th>速度X</th><th>速度Y</th></tr>';
+            bodies.forEach((body, i) => {
+                html += `<tr>
+                    <td>${i+1}</td>
+                    <td>${body.x.toFixed(2)}</td>
+                    <td>${body.y.toFixed(2)}</td>
+                    <td>${body.vx.toFixed(2)}</td>
+                    <td>${body.vy.toFixed(2)}</td>
+                </tr>`;
+            });
+            document.getElementById('dataPanel').innerHTML = html;
+        }
+
+        function reset() {
+            isSimulating = false;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            bodies = [];
+            updateDataPanel();
+        }
+    </script>
+</body>
+</html>

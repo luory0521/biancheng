@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>单质点运动模拟器</title>
+    <style>
+        /* 保持原有样式 */
+        #motionMode { margin-top:10px; width:100% }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <canvas id="canvas" width="800" height="600"></canvas>
+        <div class="controls">
+            <div class="control-group">
+                <h3>运动控制</h3>
+                <select id="motionMode">...</select>
+                <label>弹性系数: <input type="range" id="elasticity" min="0" max="1" step="0.1" value="1"></label>
+                <label>加速度X: <input type="number" id="ax" value="0"> px/s²</label>
+                <label>加速度Y: <input type="number" id="ay" value="0"> px/s²</label>
+            </div>
+            <!-- 其他控制项保持 -->
+        </div>
+    </div>
+
+    <script>
+        class Particle {
+            constructor() {
+                this.updateParams();  // 参数集中更新‌:ml-citation{ref="3" data="citationList"}
+                this.trail = [];
+            }
+
+            updateParams() {
+                this.ax = parseFloat(ax.value);
+                this.ay = parseFloat(ay.value);
+                // 其他参数更新...
+            }
+
+            move(dt) {
+                switch(motionMode.value) {
+                    case 'accelerated':
+                        this.vx += this.ax * dt;  // 匀变速方程‌:ml-citation{ref="5" data="citationList"}
+                        this.vy += this.ay * dt;
+                        break;
+                    case 'circular':
+                        const centripetal = 0.1;  // 向心加速度‌:ml-citation{ref="1" data="citationList"}
+                        this.ax = -centripetal * this.vx;
+                        this.ay = -centripetal * this.vy;
+                }
+                // 运动更新...
+            }
+        }
+    </script>
+</body>
+</html>

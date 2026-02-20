@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>方块逃脱</title>
+    <style>
+        body {
+            /* 你可以将这里的图片链接替换为你自己的固定图片链接 */
+            background-image: url('./方块逃脱_files/background.jpg');
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        canvas{
+            border:1px solid black;
+            background-color: rgba(255, 255, 255, 0.8); /* 给画布添加半透明背景，提高可见性 */
+        }
+        #startPage, #introPage {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: rgba(255, 255, 255, 0.8); /* 给开始页面和介绍页面添加半透明背景 */
+            padding: 20px;
+            border-radius: 10px;
+        }
+        #authorInfo {
+            display: flex;
+            justify-content: space-around;
+            width: 300px;
+        }
+        #difficultySelector {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 开始页面 -->
+    <div id="startPage">
+        <h1>方块逃脱游戏</h1>
+        <div id="authorInfo">
+            <div>
+                <h3>学校</h3>
+                <p>昆明市盘龙区财大附中</p>
+            </div>
+            <div>
+                <h3>姓名</h3>
+                <p>罗睿羽</p>
+            </div>
+        </div>
+        <select id="difficultySelector">
+            <option value="easy">简单</option>
+            <option value="medium">中等</option>
+            <option value="hard">困难</option>
+        </select>
+        <button onclick="showIntroPage()">开始游戏</button>
+    </div>
+    <!-- 介绍页面 -->
+    <div id="introPage" style="display: none;">
+        <h2>游戏介绍</h2>
+        <p>这是一个方块逃脱的游戏，你需要控制蓝色方块躲避灰色障碍物，到达绿色的出口。</p>
+        <button onclick="startGame()">开始游戏</button>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600" style="display: none;"></canvas>
+    <script>
+        const startPage = document.getElementById('startPage');
+        const introPage = document.getElementById('introPage');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let player, obstacles, exit;
+        let gameOver = false, win = false;
+        let difficulty = 'easy';
+
+        function showIntroPage() {
+            difficulty = document.getElementById('difficultySelector').value;
+            startPage.style.display = 'none';
+            introPage.style.display = 'flex';
+        }
+
+        function startGame() {
+            introPage.style.display = 'none';
+            canvas.style.display = 'block';
+
+            // 根据难度设置参数
+            let obstacleCount, playerSpeed;
+            switch (difficulty) {
+                case 'easy':
+                    obstacleCount = 10;
+                    playerSpeed = 5;
+                    break;
+                case 'medium':
+                    obstacleCount = 20;
+                    playerSpeed = 6;
+                    break;
+                case 'hard':
+                    obstacleCount = 30;
+                    playerSpeed = 7;
+                    break;
+            }
+
+            player = {x: 50, y: 50, speed: playerSpeed, width: 30, height: 30};
+            exit = {x: canvas.width - 80, y: canvas.height - 80, width: 50, height: 50};
+            obstacles = [];
+
+            // 生成障碍物，避免重叠和出现在特定区域
+            for (let i = 0; i < obstacleCount; i++) {
+                let valid = false;
+                let newObstacle;
+                while (!valid) {
+                    newObstacle = {
+                        x: Math.random() * (canvas.width - 50),
+                        y: Math.random() * (canvas.height - 50),
+                        width: 50,
+                        height: 50
+                    };
+                    valid = true;
+                    // 检查是否与玩家出生区域重叠
+                    if (checkCollision(newObstacle, player)) valid = false;
+                    // 检查是否与出口重叠
+                    if (checkCollision(newObstacle, exit)) valid = false;
+                    // 检查是否与其他障碍物重叠
+                    for (let j = 0; j < obstacles.length; j++) {
+                        if (checkCollision(newObstacle, obstacles[j])) {
+                            valid = false;
+                            break;
+                        }
+                    }
+                }
+                obstacles.push(newObstacle);
+            }
+
+            gameLoop();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+            ctx.fillStyle = 'gray';
+            obstacles.forEach(obstacle => ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height));
+            ctx.fillStyle = 'green';
+            ctx.fillRect(exit.x, exit.y, exit.width, exit.height);
+            if (gameOver) {
+                ctx.font = '30px Arial';
+                ctx.fillStyle = 'red';
+                ctx.fillText('游戏失败', canvas.width / 2 - 75, canvas.height / 2);
+            }
+            if (win) {
+                ctx.font = '30px Arial';

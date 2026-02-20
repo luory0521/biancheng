@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>三体模拟器 - 运动修复版</title>
+    <style>
+        canvas { border: 1px solid #000; background: #000; }
+        .control-panel { margin: 10px; padding: 10px; border: 1px solid #444; background: #333; color: #fff; }
+        .param-group { margin: 5px; padding: 5px; border-bottom: 1px dashed #666; }
+        input[type="number"] { width: 60px; background: #222; color: #fff; border: 1px solid #444; }
+        button { background: #444; color: #fff; border: 1px solid #666; padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <div class="control-panel">
+        <div>
+            <button onclick="toggleMode()">切换2D/3D模式</button>
+            当前模式: <span id="modeDisplay">3D</span>
+            <button id="startBtn" onclick="toggleRunning()">开始</button>
+            <button onclick="reset()">重置</button>
+        </div>
+        
+        <div class="param-group">
+            质点数量: 
+            <select id="bodyCount" onchange="handleBodyCountChange()">
+                <option>1</option>
+                <option>2</option>
+                <option selected>3</option>
+            </select>
+            时间步长: <input type="number" id="timeStep" value="0.01" step="0.001" min="0.001" max="0.1">
+        </div>
+
+        <div id="parameters"></div>
+    </div>
+
+    <canvas id="canvas" width="1200" height="800"></canvas>
+
+    <script>
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let is3D = true;
+        let bodies = [];
+        let running = false;
+        let trail = [];
+        const G = 0.5;
+        let animationFrameId = null;
+
+        class Body {
+            constructor(mass, x, y, z, vx, vy, vz, color) {
+                this.mass = Math.max(1, mass);
+                this.position = {x, y, z};
+                this.velocity = {x: vx, y: vy, z: vz};
+                this.color = color || '#FFFFFF';
+            }
+        }
+
+        function initializeExample() {
+            bodies = [
+                new Body(150, 500, 400, 0, 0, -0.5, 0, '#FF5555'),
+                new Body(200, 700, 400, 0, 0, 0.5, 0, '#55FF55'),
+                new Body(100, 600, 600, 0, 0.3, 0, 0, '#5555FF')
+            ];
+        }
+
+        function handleBodyCountChange() {
+            const newCount = parseInt(document.getElementById('bodyCount').value);
+            const oldCount = bodies.length;
+            
+            if (newCount > oldCount) {
+                for (let i = oldCount; i < newCount; i++) {
+                    bodies.push(new Body(
+                        100, 
+                        400 + i*50, 
+                        300 + i*50, 
+                        0, 
+                        (i-0.5)*0.2, 
+                        (0.5-i)*0.2, 
+                        0,
+                        `hsl(${(i * 120) % 360}, 100%, 50%)`
+                    ));
+                }
+            } else {
+                bodies.length = newCount;
+            }
+            
+            createParameterInputs();
+        }
+
+        function createParameterInputs() {
+            let count = parseInt(document.getElementById('bodyCount').value);
+            let container = document.getElementById('parameters');
+            container.innerHTML = '';
+            
+            for (let i = 0; i < count; i++) {
+                const body = bodies[i] || new Body(100, 400, 300, 0, 0, 0, 0, '#FFFFFF');
+                container.innerHTML += `
+                    <div class="param-group">
+                        质点 ${i+1}:
+                        质量 <input type="number" id="m${i}" value="${body.mass}" min="1">
+                        X <input type="number" id="x${i}" value="${body.position.x}" ${running ? 'readonly' : ''}>
+                        Y <input type="number" id="y${i}" value="${body.position.y}" ${running ? 'readonly' : ''}>
+                        ${is3D ? `Z <input type="number" id="z${i}" value="${body.position.z}" ${running ? 'readonly' : ''}>` : ''}
+                        VX <input type="number" id="vx${i}" value="${body.velocity.x}" step="0.1">
+                        VY <input type="number" id="vy${i}" value="${body.velocity.y}" step="0.1">
+                        ${is3D ? `VZ <input type="number" id="vz${i}" value="${body.velocity.z}" step="0.1">` : ''}
+                        颜色 <input type="color" value="${body.color}" class="colorInput" data-index="${i}">
+                    </div>`;
+            }
+            
+            // 添加实时参数更新
+            document.querySelectorAll('.colorInput').forEach(input => {
+                input.addEventListener('input', (e) => {
+                    const index = e.target.dataset.index;
+                    bodies[index].color = e.target.value;
+                });
+            });
+
+            // 添加数值输入监听
+            document.querySelectorAll('input[type="number"]').forEach(input => {
+                input.addEventListener('input', () => updateRuntimeParams());
+            });
+        }
+
+        function updateRuntimeParams() {
+            try {
+                const count = parseInt(document.getElementById('bodyCount').value);
+                
+                for (let i = 0; i < count; i++) {
+                    // 仅更新允许修改的参数（质量和速度）
+                    if (bodies[i]) {
+                        bodies[i].mass = Math.max(1, parseFloat(document.getElementById(`m${i}`).value));
+                        bodies[i].velocity.x = parseFloat(document.getElementById(`vx${i}`).value);
+                        bodies[i].velocity.y = parseFloat(document.getElementById(`vy${i}`).value);
+                        if (is3D) {
+                            bodies[i].velocity.z = parseFloat(document.getElementById(`vz${i}`).value);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("参数更新失败:", e);
+            }
+        }
+
+        function calculateForces() {
+            const dt = Math.max(0.001, Math.min(0.1, 
+                parseFloat(document.getElementById('timeStep').value)));
+            
+            for (let i = 0; i < bodies.length; i++) {
+                let ax = 0, ay = 0, az = 0;
+                
+                for (let j = 0; j < bodies.length; j++) {
+                    if (i === j) continue;
+                    const dx = bodies[j].position.x - bodies[i].position.x;
+                    const dy = bodies[j].position.y - bodies[i].position.y;
+                    const dz = bodies[j].position.z - bodies[i].position.z;
+                    const r = Math.sqrt(dx*dx + dy*dy + dz*dz + 1);
+                    const F = G * bodies[j].mass / (r*r);
+                    
+                    ax += F * dx/r;
+                    ay += F * dy/r;
+                    az += F * dz/r;
+                }
+                
+                bodies[i].velocity.x += ax * dt;
+                bodies[i].velocity.y += ay * dt;
+                bodies[i].velocity.z += az * dt;
+            }
+
+            bodies.forEach(body => {
+                body.position.x += body.velocity.x * dt;
+                body.position.y += body.velocity.y * dt;
+                body.position.z += body.velocity.z * dt;
+            });
+        }
+
+        function draw() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // 轨迹绘制
+            trail.push(bodies.map(b => ({...b.position})));
+            if (trail.length > 100) trail.shift();
+            
+            trail.forEach((positions, index) => {
+                positions.forEach((pos, i) => {
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, 2, 0, Math.PI*2);
+                    ctx.fillStyle = bodies[i].color + Math.round(20 + index*2).toString(16).padStart(2, '0');
+                    ctx.fill();
+                });
+            });
+
+            // 绘制物体
+            bodies.forEach(body => {
+                ctx.beginPath();
+                ctx.arc(body.position.x, body.position.y, 
+                       Math.sqrt(body.mass)/5, 0, Math.PI*2);
+                ctx.fillStyle = body.color;
+                ctx.fill();
+
+                if (is3D) {
+                    ctx.beginPath();
+                    const depth = 5 + Math.min(50, Math.abs(body.position.z))/5;
+                    ctx.arc(body.position.x, body.position.y, depth, 0, Math.PI*2);
+                    ctx.strokeStyle = body.color;
+                    ctx.stroke();
+                }
+            });
+        }
+
+        function animate() {
+            if (!running) return;
+            
+            try {
+                calculateForces();
+                draw();
+            } catch (e) {
+                console.error("运行错误:", e);
+                toggleRunning();
+            }
+            
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        function toggleRunning() {
+            running = !running;
+            document.getElementById('startBtn').textContent = running ? '暂停' : '开始';
+            createParameterInputs(); // 更新输入框状态
+            if (running) {
+                animationFrameId = requestAnimationFrame(animate);
+            } else {
+                cancelAnimationFrame(animationFrameId);
+            }
+        }
+
+        function toggleMode() {
+            is3D = !is3D;
+            document.getElementById('modeDisplay').textContent = is3D ? '3D' : '2D';
+            createParameterInputs();
+        }
+
+        function reset() {
+            running = false;
+            document.getElementById('startBtn').textContent = '开始';
+            initializeExample();
+            createParameterInputs();
+            trail = [];
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // 初始化
+        initializeExample();
+        createParameterInputs();
+        draw();
+    </script>
+</body>
+</html>

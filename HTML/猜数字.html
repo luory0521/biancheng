@@ -1,0 +1,110 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>猜数字游戏</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f0f0f0;
+        }
+        #game-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        #message {
+            margin: 20px 0;
+            font-size: 18px;
+            color: #666;
+        }
+        input {
+            padding: 10px;
+            font-size: 16px;
+            margin: 10px;
+            width: 100px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 20px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <h1>猜数字游戏</h1>
+        <p>我已想好了一个 1 到 100 之间的数字，你来猜猜看！</p>
+        <div id="message">请输入一个数字：</div>
+        <input type="number" id="guessInput" min="1" max="100">
+        <br>
+        <button onclick="checkGuess()">猜一猜</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // 生成一个1到100之间的随机整数
+        let targetNumber = Math.floor(Math.random() * 100) + 1;
+        let guessCount = 0;
+        let lastLow = 1; // 上次猜测的最小值
+        let lastHigh = 100; // 上次猜测的最大值
+
+        function checkGuess() {
+            const userGuess = parseInt(document.getElementById('guessInput').value);
+            const resultDiv = document.getElementById('result');
+
+            if (isNaN(userGuess) || userGuess < 1 || userGuess > 100) {
+                resultDiv.innerHTML = "请输入一个有效的数字（1 到 100 之间）！";
+                return;
+            }
+
+            // 检查输入的数字是否在上次范围内
+            if (userGuess < lastLow || userGuess > lastHigh) {
+                resultDiv.innerHTML = `你的数字不在上次的范围内（${lastLow} 到 ${lastHigh}）！`;
+                return;
+            }
+
+            guessCount++;
+            resultDiv.innerHTML = `这是你猜的第 ${guessCount} 次。`;
+
+            if (userGuess === targetNumber) {
+                resultDiv.innerHTML += " <strong>你猜对了！</strong>";
+                // 游戏结束，重置
+                setTimeout(() => {
+                    resultDiv.innerHTML = "游戏结束！我重新想了一个数字，你可以再试一次！";
+                    targetNumber = Math.floor(Math.random() * 100) + 1;
+                    guessCount = 0;
+                    lastLow = 1;
+                    lastHigh = 100;
+                }, 2000);
+            } else if (userGuess < targetNumber) {
+                resultDiv.innerHTML += " <strong>猜的数字太小了！</strong>";
+                lastLow = userGuess + 1; // 更新最小值
+            } else {
+                resultDiv.innerHTML += " <strong>猜的数字太大了！</strong>";
+                lastHigh = userGuess - 1; // 更新最大值
+            }
+        }
+    </script>
+</body>
+</html>
