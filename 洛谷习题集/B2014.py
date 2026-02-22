@@ -1,0 +1,5 @@
+r=float(input())
+d=round(2*r,4)
+c=round(2*3.14159*r,4)
+s=round(3.14159*r*r,4)
+print(f"{d:.4f} {c:.4f} {s:.4f} ")
